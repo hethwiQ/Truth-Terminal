@@ -62,9 +62,21 @@
             81%, 100% { opacity: 0; }
         }
 
-        /* --- ADDED: Clickable cursor style for the start screen --- */
         .cursor-start {
             cursor: pointer;
+        }
+
+        #mobile-input {
+            position: absolute;
+            opacity: 0;
+            width: 1px;
+            height: 1px;
+            border: none;
+            padding: 0;
+            margin: 0;
+            font-size: 16px; 
+            pointer-events: none;
+            z-index: -1;
         }
     </style>
 </head>
@@ -73,15 +85,13 @@
     <div class="term-green" id="terminal">
         <div id="chat-history"></div>
 
-        <!-- ADDED: id="main-cursor" and "cursor-start" class -->
-        <div class="line active-line"><span class="prompt"></span><span class="text"></span><span id="main-cursor" class="Cursor_cursor__2bnRT cursor cursor-start">&lt;?&gt;</span></div>
+        <div class="line active-line"><span class="prompt"></span><span class="text"></span><span id="main-cursor" class="Cursor_cursor__2bnRT cursor cursor-start">&lt;?&gt;</span><input type="text" id="mobile-input" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"></div>
     </div>
 
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
         import { getDatabase, ref, push, onChildAdded, remove, onValue } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
 
-        // 🔥 FIREBASE CONFIG INTEGRATED HERE 🔥
         const firebaseConfig = {
             apiKey: "AIzaSyAaTjcne7xS1vjS7Tr14WfmWQmZSPhZ_lA",
             authDomain: "truth-terminal.firebaseapp.com",
@@ -115,18 +125,31 @@
         const promptSpan = document.querySelector('.prompt');
         const chatHistory = document.getElementById('chat-history');
         const mainCursor = document.getElementById('main-cursor');
+        const mobileInput = document.getElementById('mobile-input');
 
-        // --- ADDED: Unified wake function for both click and Enter ---
+        // Auto-focus the input as soon as the page loads
+        window.addEventListener('DOMContentLoaded', () => {
+            mobileInput.focus();
+        });
+
+        document.addEventListener('click', () => {
+            mobileInput.focus();
+        });
+
         function wakeTerminal() {
             if (terminalState === "START") {
                 terminalState = "LOGIN";
                 promptSpan.textContent = '> ENTER SYSTEM KEY: '; 
-                mainCursor.classList.remove('cursor-start'); // Changes it back to a normal cursor
+                mainCursor.classList.remove('cursor-start'); 
+                mobileInput.focus(); 
             }
         }
 
-        // --- ADDED: Click listener directly on the start cursor ---
         mainCursor.addEventListener('click', wakeTerminal);
+
+        mobileInput.addEventListener('input', () => {
+            textSpan.textContent = mobileInput.value;
+        });
 
         function bootFirebaseChat() {
             chatHistory.innerHTML = ''; 
@@ -157,28 +180,36 @@
             window.scrollTo(0, document.body.scrollHeight);
         }
 
+        // FIXED: Reverted listener back to the 'document' so it always catches the Enter key!
         document.addEventListener('keydown', async function(e) {
+            
+            // Ensure any keypress attempts to focus the input just in case
+            mobileInput.focus(); 
+
             if (e.ctrlKey || e.metaKey || e.altKey) return;
 
             if (terminalState === "START") {
                 if (e.key === 'Enter') {
                     e.preventDefault();
-                    wakeTerminal(); // Uses the new wake function
+                    wakeTerminal(); 
                 } else {
                     e.preventDefault(); 
                 }
+                mobileInput.value = '';
+                textSpan.textContent = '';
                 return;
             }
 
             if (e.key === 'Enter') {
                 e.preventDefault();
-                const currentText = textSpan.textContent.trim();
+                const currentText = mobileInput.value.trim();
                 
                 if (currentText.startsWith('/hash ')) {
                     const wordToHash = currentText.replace('/hash ', '').toUpperCase();
                     const generatedHash = await hashText(wordToHash);
                     printLocalMessage(`GENERATED HASH FOR [${wordToHash}]:`);
                     printLocalMessage(generatedHash);
+                    mobileInput.value = '';
                     textSpan.textContent = '';
                     return;
                 }
@@ -188,12 +219,14 @@
                     
                     if (inputHash === SYSTEM_HASH) {
                         printLocalMessage("ACCESS GRANTED. CONNECTING TO SECURE SERVER...");
+                        mobileInput.value = '';
                         textSpan.textContent = '';
                         promptSpan.textContent = '> '; 
                         terminalState = "CHAT";
                         setTimeout(() => { bootFirebaseChat(); }, 1200);
                     } else {
                         printLocalMessage("ACCESS DENIED.");
+                        mobileInput.value = '';
                         textSpan.textContent = '';
                     }
                     return;
@@ -206,6 +239,7 @@
                         printLocalMessage("CLEAR CANCELLED.");
                     }
                     terminalState = "CHAT";
+                    mobileInput.value = '';
                     textSpan.textContent = '';
                     return;
                 }
@@ -218,13 +252,14 @@
                         chatHistory.innerHTML = ''; 
                         terminalState = "START";
                         promptSpan.textContent = ''; 
+                        mobileInput.value = '';
                         textSpan.textContent = '';
                         
-                        // Restores the clickable cursor when you lock the terminal
                         mainCursor.classList.add('cursor-start');
                     } else {
                         printLocalMessage("EXIT CANCELLED.");
                         terminalState = "CHAT";
+                        mobileInput.value = '';
                         textSpan.textContent = '';
                     }
                     return;
@@ -234,11 +269,13 @@
                     if (currentText === '/clear') {
                         terminalState = "CONFIRM_CLEAR";
                         printLocalMessage("CONFIRM CLEAR? [Y/N]");
+                        mobileInput.value = '';
                         textSpan.textContent = '';
                     } 
                     else if (currentText === '/exit') {
                         terminalState = "CONFIRM_EXIT";
                         printLocalMessage("CONFIRM EXIT? [Y/N]");
+                        mobileInput.value = '';
                         textSpan.textContent = '';
                     }
                     else if (currentText.length > 0) {
@@ -248,18 +285,11 @@
                         const seconds = String(now.getSeconds()).padStart(2, '0');
                         
                         push(messagesRef, { text: currentText, time: `${hours}:${minutes}:${seconds}` });
+                        mobileInput.value = '';
                         textSpan.textContent = '';
                     }
                 }
             } 
-            else if (e.key === 'Backspace') {
-                e.preventDefault();
-                textSpan.textContent = textSpan.textContent.slice(0, -1);
-            } 
-            else if (e.key.length === 1) {
-                e.preventDefault(); 
-                textSpan.textContent += e.key;
-            }
         });
     </script>
 </body>
