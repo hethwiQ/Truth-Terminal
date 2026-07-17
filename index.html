@@ -52,6 +52,13 @@
             font-style: italic;
         }
 
+        .date-header {
+            color: #25ff00;
+            opacity: 0.5;
+            margin-top: 15px;
+            margin-bottom: 5px;
+        }
+
         .Cursor_cursor__2bnRT {
             animation: Cursor_cursor__2bnRT 1.2s infinite;
         }
@@ -131,6 +138,7 @@
         let terminalState = "START";
         let unsubChildAdded = null;
         let unsubValue = null;
+        let lastRenderedDate = null; 
 
         const activeLine = document.querySelector('.active-line');
         const textSpan = activeLine.querySelector('.text');
@@ -164,20 +172,32 @@
 
         function bootFirebaseChat() {
             chatHistory.innerHTML = '';
+            lastRenderedDate = null; 
 
             if (unsubValue) unsubValue();
             if (unsubChildAdded) unsubChildAdded();
 
             unsubValue = onValue(messagesRef, (snapshot) => {
-                if (!snapshot.exists()) chatHistory.innerHTML = '';
+                if (!snapshot.exists()) {
+                    chatHistory.innerHTML = '';
+                    lastRenderedDate = null;
+                }
             });
 
             unsubChildAdded = onChildAdded(messagesRef, (snapshot) => {
                 const data = snapshot.val();
+
+                if (data.date && data.date !== lastRenderedDate) {
+                    const dateLine = document.createElement('div');
+                    dateLine.className = 'line date-header';
+                    dateLine.innerHTML = `[ LOG DATE: ${data.date} ]`;
+                    chatHistory.appendChild(dateLine);
+                    lastRenderedDate = data.date;
+                }
+
                 const msgTime = data.time ? '<span class="time">{' + data.time + '}</span> ' : '';
                 const newLine = document.createElement('div');
                 newLine.className = 'line';
-                // FIXED: Removed the hardcoded &lt;?&gt; here!
                 newLine.innerHTML = '<span class="prompt">&gt; </span>' + msgTime + '<span class="text">' + data.text + '</span>';
                 chatHistory.appendChild(newLine);
                 window.scrollTo(0, document.body.scrollHeight);
@@ -245,6 +265,7 @@
                 if (terminalState === "CONFIRM_CLEAR") {
                     if (currentText.toUpperCase() === 'Y') {
                         remove(messagesRef);
+                        lastRenderedDate = null; 
                     } else {
                         printLocalMessage("CLEAR CANCELLED.");
                     }
@@ -260,6 +281,7 @@
                         if (unsubChildAdded) unsubChildAdded();
 
                         chatHistory.innerHTML = '';
+                        lastRenderedDate = null;
                         terminalState = "START";
                         promptSpan.textContent = '';
                         mobileInput.value = '';
@@ -288,13 +310,42 @@
                         mobileInput.value = '';
                         textSpan.textContent = '';
                     }
+                    else if (currentText === '/admin') {
+                        printLocalMessage("FETCHING SECURE PAYLOAD...");
+                        mobileInput.value = '';
+                        textSpan.textContent = '';
+                        
+                        try {
+                            // The encoded URL points exactly to admin
+                            const targetUrl = atob("aHR0cHM6Ly9yYXcuZ2l0aHVidXNlcmNvbnRlbnQuY29tL2hldGh3aVEvc2l0ZWFzc2V0cy9yZWZzL2hlYWRzL21haW4vRmlsZXMvYWRtaW4udHh0");
+                            const response = await fetch(targetUrl);
+                            
+                            if (!response.ok) throw new Error("PAYLOAD MISSING");
+                            
+                            const data = await response.text();
+                            printLocalMessage(data);
+                        } catch (error) {
+                            printLocalMessage("ERROR: ADMIN PAYLOAD OFFLINE.");
+                        }
+                    }
                     else if (currentText.length > 0) {
                         const now = new Date();
+
+                        const year = now.getFullYear();
+                        const month = String(now.getMonth() + 1).padStart(2, '0');
+                        const day = String(now.getDate()).padStart(2, '0');
+                        const dateString = `${day}-${month}-${year}`;
+
                         const hours = String(now.getHours()).padStart(2, '0');
                         const minutes = String(now.getMinutes()).padStart(2, '0');
                         const seconds = String(now.getSeconds()).padStart(2, '0');
 
-                        push(messagesRef, { text: currentText, time: `${hours}:${minutes}:${seconds}` });
+                        push(messagesRef, {
+                            text: currentText,
+                            time: `${hours}:${minutes}:${seconds}`,
+                            date: dateString
+                        });
+
                         mobileInput.value = '';
                         textSpan.textContent = '';
                     }
