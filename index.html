@@ -59,16 +59,15 @@
             margin-bottom: 5px;
         }
 
-        /* --- UPDATED: Visual Hierarchy for System Messages --- */
         .sys-prompt {
-            color: #1a9900; /* Darker green to push system prompts into the background */
+            color: #1a9900; 
             margin-right: 4px;
         }
 
         .system-msg {
-            color: #ffffff; /* Muted, slightly pastel green */
+            color: #ffffff; 
             opacity: 0.8;
-            font-size: 0.9em; /* Slightly smaller to emphasize sub-processes */
+            font-size: 0.9em; 
             font-style: italic;
         }
 
@@ -93,23 +92,6 @@
             transition: opacity 0.1s ease;
             font-family: "Source Code Pro", monospace;
         }
-
-        /* TYPING INDICATOR DISABLED
-        #typing-indicator-line {
-            display: none;
-            margin-bottom: 4px;
-        }
-        .dots::after {
-            content: '';
-            animation: blinkDots 1.5s steps(4, end) infinite;
-        }
-        @keyframes blinkDots {
-            0%, 100% { content: ''; }
-            25% { content: '.'; }
-            50% { content: '..'; }
-            75% { content: '...'; }
-        }
-        */
 
         .Cursor_cursor__2bnRT {
             animation: Cursor_cursor__2bnRT 1.2s infinite;
@@ -145,10 +127,6 @@
 
     <div class="term-green" id="terminal">
         <div id="chat-history"></div>
-
-        <!-- TYPING INDICATOR DISABLED
-        <div class="line" id="typing-indicator-line"><span class="prompt">&gt;&gt; </span>[<span class="dots"></span>]</div>
-        -->
 
         <div class="line active-line"><span class="prompt"></span><span class="text"></span><span id="main-cursor"
                 class="Cursor_cursor__2bnRT cursor cursor-start">&lt;?&gt;</span><input type="text" id="mobile-input"
@@ -238,7 +216,9 @@
             }
         }
 
-        let terminalState = "START";
+        // --- ADDED: Session state initialization logic ---
+        let terminalState = sessionStorage.getItem('truth_key') ? "CHAT" : "START";
+        
         let unsubChildAdded = null;
         let unsubValue = null;
         let lastRenderedDate = null;
@@ -271,6 +251,15 @@
 
         window.addEventListener('DOMContentLoaded', () => {
             if(terminalState !== "OVERFLOW") mobileInput.focus();
+
+            // --- ADDED: Auto-restore session flow if key exists ---
+            if (terminalState === "CHAT") {
+                userPassphrase = sessionStorage.getItem('truth_key');
+                mainCursor.classList.remove('cursor-start');
+                promptSpan.textContent = '> ';
+                printLocalMessage("SESSION RESTORED. MEMORY PARSING INITIALIZED...");
+                setTimeout(() => { bootFirebaseChat(); }, 400);
+            }
         });
 
         document.addEventListener('click', () => {
@@ -288,7 +277,6 @@
 
         mainCursor.addEventListener('click', wakeTerminal);
 
-        // TYPING INDICATOR DISABLED
         function updateTypingState(isTyping) { /* Disabled */ }
 
         mobileInput.addEventListener('input', () => {
@@ -316,10 +304,9 @@
                     }
                 });
                 if (purgeCount > 0) {
-                    // CHANGED: Using tree branching
-                    printLocalMessage(`SUCCESS: PURGED ${purgeCount} EXPIRED DATABASE LOGS.`);
+                    printLocalMessage(`└── SUCCESS: PURGED ${purgeCount} EXPIRED DATABASE LOGS.`);
                 } else {
-                    printLocalMessage(`SYSTEM CHECK: ALL RECENT RECORDS VALID.`);
+                    printLocalMessage(`└── SYSTEM CHECK: ALL RECENT RECORDS VALID.`);
                 }
             }
         }
@@ -424,7 +411,6 @@
             onChildAdded(messagesRef, unsubChildAdded);
         }
 
-        // CHANGED: Utilizing the new sys-prompt class for visual hierarchy
         function printLocalMessage(msg) {
             const newLine = document.createElement('div');
             newLine.className = 'line';
@@ -470,9 +456,8 @@
                 if (currentText.startsWith('/hash ')) {
                     const wordToHash = currentText.replace('/hash ', '').toUpperCase();
                     const generatedHash = await hashText(wordToHash);
-                    // CHANGED: Tree format implementation
                     printLocalMessage(`GENERATED HASH FOR [${wordToHash}]:`);
-                    printLocalMessage(`${generatedHash}`);
+                    printLocalMessage(`└── ${generatedHash}`);
                     mobileInput.value = '';
                     textSpan.textContent = '';
                     return;
@@ -483,6 +468,9 @@
 
                     if (inputHash === SYSTEM_HASH) {
                         userPassphrase = currentText.toUpperCase(); 
+                        
+                        // --- ADDED: Cache key securely in session storage ---
+                        sessionStorage.setItem('truth_key', userPassphrase);
                         
                         printLocalMessage("ACCESS GRANTED. MEMORY PARSING INITIALIZED...");
                         
@@ -519,6 +507,9 @@
                         if (unsubValue) unsubValue();
                         userPassphrase = ""; 
 
+                        // --- ADDED: Explicitly destroy cache on logout ---
+                        sessionStorage.removeItem('truth_key');
+
                         chatHistory.innerHTML = '';
                         lastRenderedDate = null;
                         terminalState = "START";
@@ -538,13 +529,12 @@
 
                 if (terminalState === "CHAT") {
                     if (currentText === '/help' || currentText === '/h') {
-                        // CHANGED: Rebuilt as a rigid command tree
                         printLocalMessage("SYSTEM COMMANDS:");
-                        printLocalMessage("/help, /h    : Show this system manual");
-                        printLocalMessage("/purge       : Execute global database wipe");
-                        printLocalMessage("/admin       : Retrieve secure remote payload");
-                        printLocalMessage("/hash [text] : Generate SHA-256 string");
-                        printLocalMessage("/bye, /exit  : Terminate secure session");
+                        printLocalMessage("├── /help, /h    : Show this system manual");
+                        printLocalMessage("├── /purge       : Execute global database wipe");
+                        printLocalMessage("├── /admin       : Retrieve secure remote payload");
+                        printLocalMessage("├── /hash [text] : Generate SHA-256 string");
+                        printLocalMessage("└── /bye, /exit  : Terminate secure session");
                         
                         mobileInput.value = '';
                         textSpan.textContent = '';
@@ -574,10 +564,9 @@
                             const response = await fetch(targetUrl);
                             if (!response.ok) throw new Error("PAYLOAD MISSING");
                             const data = await response.text();
-                            // CHANGED: Tree format implementation
-                            printLocalMessage(`${data}`);
+                            printLocalMessage(`└── ${data}`);
                         } catch (error) {
-                            printLocalMessage("ERROR: ADMIN PAYLOAD OFFLINE.");
+                            printLocalMessage("└── ERROR: ADMIN PAYLOAD OFFLINE.");
                         }
                         return;
                     }
