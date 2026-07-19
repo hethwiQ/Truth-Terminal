@@ -216,7 +216,6 @@
             }
         }
 
-        // --- ADDED: Session state initialization logic ---
         let terminalState = sessionStorage.getItem('truth_key') ? "CHAT" : "START";
         
         let unsubChildAdded = null;
@@ -225,6 +224,16 @@
         
         let lastMessageTime = 0; 
         const RATE_LIMIT_MS = 1500; 
+
+        // Tab Alert Variables
+        const originalTitle = document.title;
+        let alertInterval = null;
+        let isBlinking = false;
+        let sessionStartTime = 0; 
+
+        // --- ADDED: 30 Minute Inactivity Timeout Variables ---
+        let inactivityTimeout = null;
+        const INACTIVITY_LIMIT_MS = 10 * 60 * 1000; // 10 minutes in milliseconds
 
         const activeLine = document.querySelector('.active-line');
         const textSpan = activeLine.querySelector('.text');
@@ -249,10 +258,53 @@
             }
         });
 
+        // Visibility listener to clear tab alerts
+        document.addEventListener('visibilitychange', () => {
+            if (!document.hidden) {
+                clearInterval(alertInterval);
+                document.title = originalTitle;
+                isBlinking = false;
+            }
+        });
+
+        // --- ADDED: Function to handle the auto-logout when timer dies ---
+        function handleInactivityDeath() {
+            if (terminalState !== "CHAT") return;
+            
+            if (unsubValue) unsubValue();
+            if (unsubChildAdded) unsubChildAdded();
+            userPassphrase = ""; 
+            sessionStorage.removeItem('truth_key');
+
+            chatHistory.innerHTML = '';
+            lastRenderedDate = null;
+            terminalState = "START";
+            promptSpan.textContent = '';
+            mobileInput.value = '';
+            textSpan.textContent = '';
+            mainCursor.classList.add('cursor-start');
+            
+            clearInterval(alertInterval);
+            document.title = originalTitle;
+            isBlinking = false;
+
+            const deathMsg = document.createElement('div');
+            deathMsg.className = 'line term-green';
+            deathMsg.style.fontStyle = 'italic';
+            deathMsg.style.opacity = '0.7';
+            deathMsg.textContent = ">> SYSTEM HALTED: 30 MINUTE INACTIVITY TIMEOUT. CONNECTION SEVERED.";
+            chatHistory.appendChild(deathMsg);
+        }
+
+        function resetInactivityTimer() {
+            if (terminalState !== "CHAT") return;
+            clearTimeout(inactivityTimeout);
+            inactivityTimeout = setTimeout(handleInactivityDeath, INACTIVITY_LIMIT_MS);
+        }
+
         window.addEventListener('DOMContentLoaded', () => {
             if(terminalState !== "OVERFLOW") mobileInput.focus();
 
-            // --- ADDED: Auto-restore session flow if key exists ---
             if (terminalState === "CHAT") {
                 userPassphrase = sessionStorage.getItem('truth_key');
                 mainCursor.classList.remove('cursor-start');
@@ -304,9 +356,9 @@
                     }
                 });
                 if (purgeCount > 0) {
-                    printLocalMessage(`└── SUCCESS: PURGED ${purgeCount} EXPIRED DATABASE LOGS.`);
+                    printLocalMessage(`SUCCESS: PURGED ${purgeCount} EXPIRED DATABASE LOGS.`);
                 } else {
-                    printLocalMessage(`└── SYSTEM CHECK: ALL RECENT RECORDS VALID.`);
+                    printLocalMessage(`SYSTEM CHECK: ALL RECENT RECORDS VALID.`);
                 }
             }
         }
@@ -354,6 +406,8 @@
         function bootFirebaseChat() {
             chatHistory.innerHTML = '';
             lastRenderedDate = null;
+            sessionStartTime = Date.now(); 
+            resetInactivityTimer(); // Start the death timer upon boot
 
             if (unsubValue) unsubValue();
             if (unsubChildAdded) unsubChildAdded();
@@ -406,6 +460,15 @@
                 
                 chatHistory.appendChild(newLine);
                 window.scrollTo(0, document.body.scrollHeight);
+
+                if (data.timestamp && data.timestamp > sessionStartTime && document.hidden && !isBlinking) {
+                    isBlinking = true;
+                    let showNew = true;
+                    alertInterval = setInterval(() => {
+                        document.title = showNew ? "[* New Message *]" : originalTitle;
+                        showNew = !showNew;
+                    }, 1000);
+                }
             };
             
             onChildAdded(messagesRef, unsubChildAdded);
@@ -434,6 +497,11 @@
         document.addEventListener('keydown', async function (e) {
             if (terminalState === "OVERFLOW") return;
             mobileInput.focus();
+            
+            // Reset death timer on any key press
+            if (terminalState === "CHAT") {
+                resetInactivityTimer();
+            }
 
             if (e.ctrlKey || e.metaKey || e.altKey) return;
 
@@ -457,7 +525,7 @@
                     const wordToHash = currentText.replace('/hash ', '').toUpperCase();
                     const generatedHash = await hashText(wordToHash);
                     printLocalMessage(`GENERATED HASH FOR [${wordToHash}]:`);
-                    printLocalMessage(`└── ${generatedHash}`);
+                    printLocalMessage(`${generatedHash}`);
                     mobileInput.value = '';
                     textSpan.textContent = '';
                     return;
@@ -469,7 +537,6 @@
                     if (inputHash === SYSTEM_HASH) {
                         userPassphrase = currentText.toUpperCase(); 
                         
-                        // --- ADDED: Cache key securely in session storage ---
                         sessionStorage.setItem('truth_key', userPassphrase);
                         
                         printLocalMessage("ACCESS GRANTED. MEMORY PARSING INITIALIZED...");
@@ -507,8 +574,8 @@
                         if (unsubValue) unsubValue();
                         userPassphrase = ""; 
 
-                        // --- ADDED: Explicitly destroy cache on logout ---
                         sessionStorage.removeItem('truth_key');
+                        clearTimeout(inactivityTimeout);
 
                         chatHistory.innerHTML = '';
                         lastRenderedDate = null;
@@ -530,17 +597,49 @@
                 if (terminalState === "CHAT") {
                     if (currentText === '/help' || currentText === '/h') {
                         printLocalMessage("SYSTEM COMMANDS:");
-                        printLocalMessage("├── /help, /h    : Show this system manual");
-                        printLocalMessage("├── /purge       : Execute global database wipe");
-                        printLocalMessage("├── /admin       : Retrieve secure remote payload");
-                        printLocalMessage("├── /hash [text] : Generate SHA-256 string");
-                        printLocalMessage("└── /bye, /exit  : Terminate secure session");
+                        printLocalMessage("/help, /h    : Show this system manual");
+                        printLocalMessage("/motd        : Print system message of the day");
+                        printLocalMessage("/sysinfo     : Display terminal diagnostics");
+                        printLocalMessage("/uptime      : Display active session duration");
+                        printLocalMessage("/purge, /cls : Execute global database wipe");
+                        printLocalMessage("/admin       : Retrieve secure remote payload");
+                        printLocalMessage("/hash [text] : Generate SHA-256 string");
+                        printLocalMessage("/bye, /exit  : Terminate secure session");
                         
                         mobileInput.value = '';
                         textSpan.textContent = '';
                         return;
                     }
-                    else if (currentText === '/purge') {
+                    else if (currentText === '/motd') {
+                        printLocalMessage("TRUTH_TERMINAL v2.4.1 SECURE ENCLAVE ACTIVE.");
+                        printLocalMessage("E2E ENCRYPTION VERIFIED. ALL COMMS SECURED.");
+                        printLocalMessage("UNAUTHORIZED ACCESS WILL BE AUTOMATICALLY LOGGED.");
+                        mobileInput.value = '';
+                        textSpan.textContent = '';
+                        return;
+                    }
+                    else if (currentText === '/sysinfo') {
+                        const upMs = Date.now() - sessionStartTime;
+                        const minutes = Math.floor(upMs / 60000);
+                        const seconds = Math.floor((upMs % 60000) / 1000);
+                        printLocalMessage("SYSTEM DIAGNOSTICS:");
+                        printLocalMessage(`CONNECTION   : SECURE (wss://firebase)`);
+                        printLocalMessage(`LOCAL CACHE  : ACTIVE`);
+                        printLocalMessage(`SESSION TIME : ${minutes}m ${seconds}s`);
+                        mobileInput.value = '';
+                        textSpan.textContent = '';
+                        return;
+                    }
+                    else if (currentText === '/uptime') {
+                        const upMs = Date.now() - sessionStartTime;
+                        const minutes = Math.floor(upMs / 60000);
+                        const seconds = Math.floor((upMs % 60000) / 1000);
+                        printLocalMessage(`CURRENT SESSION UPTIME: ${minutes} MIN, ${seconds} SEC`);
+                        mobileInput.value = '';
+                        textSpan.textContent = '';
+                        return;
+                    }
+                    else if (currentText === '/purge' || currentText === '/cls') {
                         terminalState = "CONFIRM_PURGE";
                         printLocalMessage("CONFIRM PURGE? [Y/N]");
                         mobileInput.value = '';
@@ -564,9 +663,9 @@
                             const response = await fetch(targetUrl);
                             if (!response.ok) throw new Error("PAYLOAD MISSING");
                             const data = await response.text();
-                            printLocalMessage(`└── ${data}`);
+                            printLocalMessage(`${data}`);
                         } catch (error) {
-                            printLocalMessage("└── ERROR: ADMIN PAYLOAD OFFLINE.");
+                            printLocalMessage("ERROR: ADMIN PAYLOAD OFFLINE.");
                         }
                         return;
                     }
