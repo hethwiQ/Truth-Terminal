@@ -63,14 +63,12 @@
             font-style: italic;
         }
 
-        /* --- UPDATED: Hyperlink Base Styling --- */
         .term-link {
             color: #25ff00;
             text-decoration: underline;
             cursor: pointer;
         }
 
-        /* --- ADDED: Dynamic Cursor-Following Tooltip --- */
         #cursor-tooltip {
             position: fixed;
             background-color: #111;
@@ -81,28 +79,28 @@
             border-radius: 2px;
             white-space: nowrap;
             opacity: 0;
-            pointer-events: none; /* Prevents tooltip from blocking the actual click */
+            pointer-events: none; 
             z-index: 9999;
             transition: opacity 0.1s ease;
             font-family: "Source Code Pro", monospace;
         }
 
+        /* TYPING INDICATOR DISABLED
         #typing-indicator-line {
             display: none;
             margin-bottom: 4px;
         }
-
         .dots::after {
             content: '';
             animation: blinkDots 1.5s steps(4, end) infinite;
         }
-
         @keyframes blinkDots {
             0%, 100% { content: ''; }
             25% { content: '.'; }
             50% { content: '..'; }
             75% { content: '...'; }
         }
+        */
 
         .Cursor_cursor__2bnRT {
             animation: Cursor_cursor__2bnRT 1.2s infinite;
@@ -134,13 +132,14 @@
 </head>
 
 <body>
-    <!-- ADDED: The global floating tooltip element -->
     <div id="cursor-tooltip">CTRL + CLICK TO OPEN LINK</div>
 
     <div class="term-green" id="terminal">
         <div id="chat-history"></div>
 
+        <!-- TYPING INDICATOR DISABLED
         <div class="line" id="typing-indicator-line"><span class="prompt">&gt;&gt; </span>[<span class="dots"></span>]</div>
+        -->
 
         <div class="line active-line"><span class="prompt"></span><span class="text"></span><span id="main-cursor"
                 class="Cursor_cursor__2bnRT cursor cursor-start">&lt;?&gt;</span><input type="text" id="mobile-input"
@@ -170,7 +169,6 @@
         let userPassphrase = ""; 
 
         const mySessionId = Math.random().toString(36).substring(2, 10);
-        let typingTimeout = null;
 
         async function hashText(text) {
             const msgBuffer = new TextEncoder().encode(text);
@@ -234,7 +232,6 @@
         let terminalState = "START";
         let unsubChildAdded = null;
         let unsubValue = null;
-        let unsubTyping = null;
         let lastRenderedDate = null;
         
         let lastMessageTime = 0; 
@@ -246,8 +243,7 @@
         const chatHistory = document.getElementById('chat-history');
         const mainCursor = document.getElementById('main-cursor');
         const mobileInput = document.getElementById('mobile-input');
-        const typingIndicatorLine = document.getElementById('typing-indicator-line');
-        const cursorTooltip = document.getElementById('cursor-tooltip'); // Grab tooltip element
+        const cursorTooltip = document.getElementById('cursor-tooltip'); 
 
         let connectionVerified = false;
         const connectionTimeout = setTimeout(() => {
@@ -283,16 +279,8 @@
 
         mainCursor.addEventListener('click', wakeTerminal);
 
-        function updateTypingState(isTyping) {
-            if (terminalState !== "CHAT") return;
-            const myTypingRef = ref(db, `typing/${mySessionId}`);
-            if (isTyping) {
-                set(myTypingRef, true);
-                onDisconnect(myTypingRef).remove();
-            } else {
-                remove(myTypingRef);
-            }
-        }
+        // TYPING INDICATOR DISABLED
+        function updateTypingState(isTyping) { /* Disabled */ }
 
         mobileInput.addEventListener('input', () => {
             if (terminalState === "START" || terminalState === "OVERFLOW") {
@@ -301,15 +289,6 @@
                 return;
             }
             textSpan.textContent = mobileInput.value;
-
-            if (terminalState === "CHAT") {
-                updateTypingState(mobileInput.value.length > 0);
-                
-                clearTimeout(typingTimeout);
-                typingTimeout = setTimeout(() => {
-                    updateTypingState(false);
-                }, 2000);
-            }
         });
 
         async function runEphemeralCleanup() {
@@ -354,13 +333,11 @@
                         }
                     });
 
-                    // --- UPDATED: Tooltip logic bound to cursor movement ---
                     linkEl.addEventListener('mouseenter', () => {
                         cursorTooltip.style.opacity = '1';
                     });
                     
                     linkEl.addEventListener('mousemove', (e) => {
-                        // Offset by a few pixels so the mouse doesn't cover the box
                         cursorTooltip.style.left = (e.clientX + 12) + 'px';
                         cursorTooltip.style.top = (e.clientY + 12) + 'px';
                     });
@@ -383,7 +360,6 @@
 
             if (unsubValue) unsubValue();
             if (unsubChildAdded) unsubChildAdded();
-            if (unsubTyping) unsubTyping();
 
             unsubValue = onValue(messagesRef, (snapshot) => {
                 if (!snapshot.exists()) {
@@ -436,21 +412,6 @@
             };
             
             onChildAdded(messagesRef, unsubChildAdded);
-
-            unsubTyping = onValue(ref(db, 'typing'), (snapshot) => {
-                let showIndicator = false;
-                if (snapshot.exists()) {
-                    const statuses = snapshot.val();
-                    for (let id in statuses) {
-                        if (id !== mySessionId && statuses[id] === true) {
-                            showIndicator = true;
-                            break;
-                        }
-                    }
-                }
-                typingIndicatorLine.style.display = showIndicator ? 'block' : 'none';
-                window.scrollTo(0, document.body.scrollHeight);
-            });
         }
 
         function printLocalMessage(msg) {
@@ -544,8 +505,6 @@
                 if (terminalState === "CONFIRM_EXIT") {
                     if (currentText.toUpperCase() === 'Y') {
                         if (unsubValue) unsubValue();
-                        if (unsubTyping) unsubTyping();
-                        updateTypingState(false);
                         userPassphrase = ""; 
 
                         chatHistory.innerHTML = '';
@@ -573,7 +532,7 @@
                         printLocalMessage("/purge       : Execute global database wipe");
                         printLocalMessage("/admin       : Retrieve secure remote payload");
                         printLocalMessage("/hash [text] : Generate SHA-256 string");
-                        printLocalMessage("/bye        : Terminate secure session");
+                        printLocalMessage("/bye, /exit  : Terminate secure session");
                         
                         mobileInput.value = '';
                         textSpan.textContent = '';
@@ -586,7 +545,7 @@
                         textSpan.textContent = '';
                         return;
                     }
-                    else if (currentText === '/bye') {
+                    else if (currentText === '/exit' || currentText === '/bye') {
                         terminalState = "CONFIRM_EXIT";
                         printLocalMessage("CONFIRM EXIT? [Y/N]");
                         mobileInput.value = '';
@@ -619,7 +578,6 @@
                     }
 
                     if (currentText.length > 0) {
-                        updateTypingState(false); 
                         lastMessageTime = currentTime; 
                         const now = new Date();
 
