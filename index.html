@@ -3,7 +3,8 @@
 
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!-- CHANGED: Added maximum-scale and user-scalable=no to prevent annoying mobile keyboard auto-zoom -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 
     <title>&lt;?&gt;</title>
     <meta property="og:title" content="&lt;?&gt;">
@@ -225,15 +226,13 @@
         let lastMessageTime = 0; 
         const RATE_LIMIT_MS = 1500; 
 
-        // Tab Alert Variables
         const originalTitle = document.title;
         let alertInterval = null;
         let isBlinking = false;
         let sessionStartTime = 0; 
 
-        // --- ADDED: 30 Minute Inactivity Timeout Variables ---
         let inactivityTimeout = null;
-        const INACTIVITY_LIMIT_MS = 10 * 60 * 1000; // 10 minutes in milliseconds
+        const INACTIVITY_LIMIT_MS = 30 * 60 * 1000; 
 
         const activeLine = document.querySelector('.active-line');
         const textSpan = activeLine.querySelector('.text');
@@ -258,7 +257,6 @@
             }
         });
 
-        // Visibility listener to clear tab alerts
         document.addEventListener('visibilitychange', () => {
             if (!document.hidden) {
                 clearInterval(alertInterval);
@@ -267,7 +265,6 @@
             }
         });
 
-        // --- ADDED: Function to handle the auto-logout when timer dies ---
         function handleInactivityDeath() {
             if (terminalState !== "CHAT") return;
             
@@ -407,7 +404,7 @@
             chatHistory.innerHTML = '';
             lastRenderedDate = null;
             sessionStartTime = Date.now(); 
-            resetInactivityTimer(); // Start the death timer upon boot
+            resetInactivityTimer(); 
 
             if (unsubValue) unsubValue();
             if (unsubChildAdded) unsubChildAdded();
@@ -421,6 +418,9 @@
 
             unsubChildAdded = async (snapshot) => {
                 const data = snapshot.val();
+
+                // --- ADDED: Check if user is scrolled near the bottom before adding the new message ---
+                const isNearBottom = (document.body.scrollHeight - window.scrollY - window.innerHeight) < 150;
 
                 if (data.date && data.date !== lastRenderedDate) {
                     const dateLine = document.createElement('div');
@@ -459,7 +459,11 @@
                 newLine.appendChild(textEl);
                 
                 chatHistory.appendChild(newLine);
-                window.scrollTo(0, document.body.scrollHeight);
+
+                // --- ADDED: Smart Scroll Logic. Only scrolls down if you were already at the bottom ---
+                if (isNearBottom) {
+                    window.scrollTo(0, document.body.scrollHeight);
+                }
 
                 if (data.timestamp && data.timestamp > sessionStartTime && document.hidden && !isBlinking) {
                     isBlinking = true;
@@ -491,6 +495,7 @@
             newLine.appendChild(text);
 
             chatHistory.appendChild(newLine);
+            // System commands and local logs should always snap the user to the bottom to see the result
             window.scrollTo(0, document.body.scrollHeight);
         }
 
@@ -498,7 +503,6 @@
             if (terminalState === "OVERFLOW") return;
             mobileInput.focus();
             
-            // Reset death timer on any key press
             if (terminalState === "CHAT") {
                 resetInactivityTimer();
             }
