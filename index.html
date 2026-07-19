@@ -32,20 +32,22 @@
             color: #25ff00;
             text-shadow: 0 0 2px rgba(203, 254, 182, 0.7);
             letter-spacing: 0.06em;
-            font-size: 1.3em;
+            /* UPDATED: Fluid font sizing scaling beautifully from mobile to desktop */
+            font-size: clamp(0.95rem, 2.8vw, 1.25rem);
             font-family: "Source Code Pro", monospace;
             font-style: normal;
             font-weight: 400;
-            line-height: 1.5rem;
+            line-height: 1.6rem;
             text-transform: uppercase;
-            word-break: break-all;
         }
 
         .line {
             display: block;
-            word-wrap: break-word;
-            margin-bottom: 4px;
+            margin-bottom: 6px;
             white-space: pre-wrap;
+            /* UPDATED: Natural text wrapping for regular words, forces split only on long encrypted hashes */
+            word-break: normal;
+            overflow-wrap: break-word;
         }
 
         .time {
