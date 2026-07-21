@@ -1,5 +1,5 @@
 import { hashText, initCryptoKey, encryptMessage, decryptMessage, clearCryptoState } from './crypto.js';
-import * as DB from './firebase.js';
+import * as DB from './base.js';
 
 // =====================================================================
 // 1. CONFIGURATION & STATE
