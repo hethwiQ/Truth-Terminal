@@ -3,9 +3,7 @@
 
 <head>
     <meta charset="UTF-8">
-    <!-- CHANGED: Added maximum-scale and user-scalable=no to prevent annoying mobile keyboard auto-zoom -->
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-
     <title>&lt;?&gt;</title>
     <meta property="og:title" content="&lt;?&gt;">
     <meta property="og:type" content="website">
@@ -27,6 +25,22 @@
             margin: 0;
             padding: 20px;
             overflow-x: hidden;
+            font-family: "Source Code Pro", monospace;
+        }
+
+        /* Floating high z-index operator counter */
+        #floating-counter {
+            display: none;
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 9999;
+            background-color: #050505;
+            padding: 4px 8px;
+            border: 1px dashed rgba(37, 255, 0, 0.3);
+            color: #25ff00;
+            font-size: 0.9em;
+            letter-spacing: 0.05em;
         }
 
         .term-green {
@@ -34,7 +48,6 @@
             text-shadow: 0 0 2px rgba(203, 254, 182, 0.7);
             letter-spacing: 0.06em;
             font-size: clamp(0.95rem, 2.8vw, 1.25rem);
-            font-family: "Source Code Pro", monospace;
             font-style: normal;
             font-weight: 400;
             line-height: 1.6rem;
@@ -49,34 +62,10 @@
             overflow-wrap: break-word;
         }
 
-        .time {
-            font-style: italic;
-        }
-
-        .date-header {
-            color: #25ff00;
-            opacity: 0.5;
-            margin-top: 15px;
-            margin-bottom: 5px;
-        }
-
-        .sys-prompt {
-            color: #1a9900; 
-            margin-right: 4px;
-        }
-
-        .system-msg {
-            color: #ffffff; 
-            opacity: 0.8;
-            font-size: 0.9em; 
-            font-style: italic;
-        }
-
-        .term-link {
-            color: #25ff00;
-            text-decoration: underline;
-            cursor: pointer;
-        }
+        .time { font-style: italic; }
+        .sys-prompt { color: #1a9900; margin-right: 4px; }
+        .system-msg { color: #ffffff; opacity: 0.8; font-size: 0.9em; font-style: italic; }
+        .term-link { color: #25ff00; text-decoration: underline; cursor: pointer; }
 
         #cursor-tooltip {
             position: fixed;
@@ -91,22 +80,11 @@
             pointer-events: none; 
             z-index: 9999;
             transition: opacity 0.1s ease;
-            font-family: "Source Code Pro", monospace;
         }
 
-        .Cursor_cursor__2bnRT {
-            animation: Cursor_cursor__2bnRT 1.2s infinite;
-        }
-
-        @keyframes Cursor_cursor__2bnRT {
-            0% { opacity: 0; }
-            60%, 80% { opacity: 1; }
-            81%, 100% { opacity: 0; }
-        }
-
-        .cursor-start {
-            cursor: pointer;
-        }
+        .Cursor_cursor__2bnRT { animation: Cursor_cursor__2bnRT 1.2s infinite; }
+        @keyframes Cursor_cursor__2bnRT { 0% { opacity: 0; } 60%, 80% { opacity: 1; } 81%, 100% { opacity: 0; } }
+        .cursor-start { cursor: pointer; }
 
         #mobile-input {
             position: absolute;
@@ -126,12 +104,11 @@
 <body>
     <div id="cursor-tooltip">CTRL + CLICK TO OPEN LINK</div>
 
+    <div id="floating-counter"></div>
+
     <div class="term-green" id="terminal">
         <div id="chat-history"></div>
-
-        <div class="line active-line"><span class="prompt"></span><span class="text"></span><span id="main-cursor"
-                class="Cursor_cursor__2bnRT cursor cursor-start">&lt;?&gt;</span><input type="text" id="mobile-input"
-                autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"></div>
+        <div class="line active-line"><span class="prompt"></span><span class="text"></span><span id="main-cursor" class="Cursor_cursor__2bnRT cursor cursor-start">&lt;?&gt;</span><input type="text" id="mobile-input" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"></div>
     </div>
 
     <script type="module">
@@ -151,47 +128,69 @@
 
         const app = initializeApp(firebaseConfig);
         const db = getDatabase(app);
-        const messagesRef = ref(db, 'messages');
 
-        const SYSTEM_HASH = "c92bcb2ea7bb84e1c56bd8e0f16b9f01fc8fb928de8ce5f71ca91cb84cc753dd";
-        let userPassphrase = ""; 
+        // =====================================================================
+        // 1. GLOBAL CONSTANTS
+        // =====================================================================
+        const CONFIG = {
+            MAX_OPERATORS: 10,
+            ROOM_LIFETIME_MS: 24 * 60 * 60 * 1000, 
+            SESSION_TIMEOUT_MS: 15 * 60 * 1000,    
+            HEARTBEAT_INTERVAL_MS: 45000,          
+            WARNING_TIME_MS: 10 * 60 * 1000,       
+            SCHEMA_VERSION: 2,
+            TRANSIENT_MSG_MS: 2 * 1000 // 2 Seconds before UI wipe
+        };
 
-        const mySessionId = Math.random().toString(36).substring(2, 10);
+        let terminalState = "START";
+        let activeAccessPhrase = "";
+        let activeRoomHash = "";
+        let activeRoomID = "";
 
+        const activeLine = document.querySelector('.active-line');
+        const textSpan = activeLine.querySelector('.text');
+        const promptSpan = activeLine.querySelector('.prompt'); 
+        const chatHistory = document.getElementById('chat-history');
+        const mainCursor = document.getElementById('main-cursor');
+        const mobileInput = document.getElementById('mobile-input');
+        const cursorTooltip = document.getElementById('cursor-tooltip'); 
+        const floatingCounter = document.getElementById('floating-counter');
+
+        const originalTitle = document.title;
+        let alertInterval = null;
+        let isBlinking = false;
+        let sessionStartTime = 0; 
+
+        // =====================================================================
+        // 2. UTILITY FUNCTIONS
+        // =====================================================================
+        function isValidAccessPhrase(phrase) { return /^[a-zA-Z0-9]+$/.test(phrase); }
+        function generateDisplayRoomID(roomHash) { return roomHash.substring(0, 6).toUpperCase(); }
+
+        // =====================================================================
+        // 3. CRYPTOGRAPHY
+        // =====================================================================
         async function hashText(text) {
             const msgBuffer = new TextEncoder().encode(text);
             const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
-            const hashArray = Array.from(new Uint8Array(hashBuffer));
-            return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+            return Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join('');
         }
 
         async function deriveUniqueKey(passphrase, saltBytes) {
             const enc = new TextEncoder();
-            const keyMaterial = await crypto.subtle.importKey(
-                "raw", enc.encode(passphrase), "PBKDF2", false, ["deriveKey"]
-            );
+            const keyMaterial = await crypto.subtle.importKey("raw", enc.encode(passphrase), "PBKDF2", false, ["deriveKey"]);
             return crypto.subtle.deriveKey(
                 { name: "PBKDF2", salt: saltBytes, iterations: 100000, hash: "SHA-256" },
-                keyMaterial,
-                { name: "AES-GCM", length: 256 },
-                false,
-                ["encrypt", "decrypt"]
+                keyMaterial, { name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]
             );
         }
 
         async function encryptMessage(plaintext) {
             const saltBytes = crypto.getRandomValues(new Uint8Array(16));
             const iv = crypto.getRandomValues(new Uint8Array(12));
-            
-            const messageKey = await deriveUniqueKey(userPassphrase, saltBytes);
+            const messageKey = await deriveUniqueKey(activeAccessPhrase, saltBytes);
             const encoded = new TextEncoder().encode(plaintext);
-            
-            const ciphertext = await crypto.subtle.encrypt(
-                { name: "AES-GCM", iv: iv },
-                messageKey,
-                encoded
-            );
-            
+            const ciphertext = await crypto.subtle.encrypt({ name: "AES-GCM", iv: iv }, messageKey, encoded);
             return {
                 cipher: btoa(String.fromCharCode(...new Uint8Array(ciphertext))),
                 iv: btoa(String.fromCharCode(...iv)),
@@ -204,59 +203,297 @@
                 const ciphertext = new Uint8Array(atob(cipherB64).split("").map(c => c.charCodeAt(0)));
                 const iv = new Uint8Array(atob(ivB64).split("").map(c => c.charCodeAt(0)));
                 const saltBytes = new Uint8Array(atob(saltB64).split("").map(c => c.charCodeAt(0)));
-                
-                const messageKey = await deriveUniqueKey(userPassphrase, saltBytes);
-                const decrypted = await crypto.subtle.decrypt(
-                    { name: "AES-GCM", iv: iv },
-                    messageKey,
-                    ciphertext
-                );
+                const messageKey = await deriveUniqueKey(activeAccessPhrase, saltBytes);
+                const decrypted = await crypto.subtle.decrypt({ name: "AES-GCM", iv: iv }, messageKey, ciphertext);
                 return new TextDecoder().decode(decrypted);
             } catch (e) {
                 return "[UNAUTHORIZED: ENCRYPTED_LOG_GIBBERISH]";
             }
         }
 
-        let terminalState = sessionStorage.getItem('truth_key') ? "CHAT" : "START";
-        
+        // =====================================================================
+        // 4. FIREBASE & ROOM MANAGEMENT
+        // =====================================================================
+        let mySessionId = sessionStorage.getItem('tt_session_id') || null;
+        let heartbeatTimer = null;
+        let mySessionRef = null;
+        let messagesRef = null;
         let unsubChildAdded = null;
         let unsubValue = null;
-        let lastRenderedDate = null;
+        let warningTimer = null;
+        let confirmPrompt = null;
         
-        let lastMessageTime = 0; 
-        const RATE_LIMIT_MS = 1500; 
+        async function joinOrCreateRoom() {
+            const roomRef = ref(db, `rooms/${activeRoomHash}`);
+            const metadataRef = ref(db, `rooms/${activeRoomHash}/metadata`);
+            const sessionsRef = ref(db, `rooms/${activeRoomHash}/sessions`);
+            messagesRef = ref(db, `rooms/${activeRoomHash}/messages`);
 
-        const originalTitle = document.title;
-        let alertInterval = null;
-        let isBlinking = false;
-        let sessionStartTime = 0; 
+            const metaSnap = await get(metadataRef);
+            const now = Date.now();
+            let roomExpiresAt = 0;
 
-        let inactivityTimeout = null;
-        const INACTIVITY_LIMIT_MS = 15 * 60 * 1000; 
-
-        const activeLine = document.querySelector('.active-line');
-        const textSpan = activeLine.querySelector('.text');
-        const promptSpan = activeLine.querySelector('.prompt'); 
-        const chatHistory = document.getElementById('chat-history');
-        const mainCursor = document.getElementById('main-cursor');
-        const mobileInput = document.getElementById('mobile-input');
-        const cursorTooltip = document.getElementById('cursor-tooltip'); 
-
-        let connectionVerified = false;
-        const connectionTimeout = setTimeout(() => {
-            if (!connectionVerified) {
-                terminalState = "OVERFLOW";
-                document.body.innerHTML = '<div class="term-green" style="font-style: italic;">&gt;&gt; ERROR: OVERSESSION EXCEEDED. SERVER FULL.</div>';
+            if (!metaSnap.exists()) {
+                roomExpiresAt = now + CONFIG.ROOM_LIFETIME_MS;
+                await set(metadataRef, { createdAt: now, expiresAt: roomExpiresAt, schemaVersion: CONFIG.SCHEMA_VERSION });
+            } else {
+                const meta = metaSnap.val();
+                if (now >= meta.expiresAt) {
+                    await remove(roomRef);
+                    roomExpiresAt = now + CONFIG.ROOM_LIFETIME_MS;
+                    await set(metadataRef, { createdAt: now, expiresAt: roomExpiresAt, schemaVersion: CONFIG.SCHEMA_VERSION });
+                } else {
+                    roomExpiresAt = meta.expiresAt;
+                }
             }
-        }, 5000);
 
-        onValue(ref(db, ".info/connected"), (snap) => {
-            if (snap.val() === true) {
-                connectionVerified = true;
-                clearTimeout(connectionTimeout);
+            const sessSnap = await get(sessionsRef);
+            if (sessSnap.exists()) {
+                const sessions = sessSnap.val();
+                let activeCount = 0;
+                for (const [sId, sData] of Object.entries(sessions)) {
+                    if (now - sData.lastSeen > CONFIG.SESSION_TIMEOUT_MS) remove(ref(db, `rooms/${activeRoomHash}/sessions/${sId}`));
+                    else activeCount++;
+                }
+                if (!mySessionId && activeCount >= CONFIG.MAX_OPERATORS) {
+                    printLocalMessage(`[SYSTEM] CONNECTION REFUSED: ROOM CAPACITY REACHED (10/10).`, true);
+                    return false;
+                }
             }
-        });
 
+            if (!mySessionId) {
+                mySessionId = Math.random().toString(36).substring(2, 15);
+                sessionStorage.setItem('tt_session_id', mySessionId);
+            }
+            
+            mySessionRef = ref(db, `rooms/${activeRoomHash}/sessions/${mySessionId}`);
+            
+            await set(mySessionRef, { lastSeen: now });
+            onDisconnect(mySessionRef).remove();
+
+            heartbeatTimer = setInterval(() => { set(mySessionRef, { lastSeen: Date.now() }); }, CONFIG.HEARTBEAT_INTERVAL_MS);
+
+            const timeUntilWarning = (roomExpiresAt - CONFIG.WARNING_TIME_MS) - Date.now();
+            if (timeUntilWarning > 0) {
+                warningTimer = setTimeout(() => {
+                    printLocalMessage("[WARNING]\nROOM WILL SELF-DESTRUCT IN 10 MINUTES", false); // Keep warnings permanent
+                }, timeUntilWarning);
+            }
+
+            startPresenceListener();
+            return true;
+        }
+
+        // =====================================================================
+        // 5. PRESENCE MANAGEMENT
+        // =====================================================================
+        let currentOperatorCount = 1;
+        let unsubPresence = null;
+
+        function startPresenceListener() {
+            const sessRef = ref(db, `rooms/${activeRoomHash}/sessions`);
+            unsubPresence = onValue(sessRef, (snap) => {
+                if (!snap.exists()) return;
+                let count = 0;
+                const now = Date.now();
+                for (const sData of Object.values(snap.val())) {
+                    if (now - sData.lastSeen <= CONFIG.SESSION_TIMEOUT_MS) count++;
+                }
+                currentOperatorCount = count;
+                floatingCounter.textContent = `${count}/${CONFIG.MAX_OPERATORS}`;
+                
+                if (count <= 4) floatingCounter.style.color = '#25ff00';
+                else if (count <= 7) floatingCounter.style.color = '#ffff00';
+                else floatingCounter.style.color = '#ff0000';
+            });
+        }
+
+        // =====================================================================
+        // 6. TERMINAL RENDERING & URL PARSING
+        // =====================================================================
+        function parseAndAppendTextWithLinks(parentElement, rawString) {
+            const urlRegex = /(https?:\/\/[^\s]+)/g;
+            const parts = rawString.split(urlRegex);
+            parts.forEach(part => {
+                if (part.match(urlRegex)) {
+                    const linkEl = document.createElement('a');
+                    linkEl.className = 'term-link';
+                    linkEl.textContent = part;
+                    linkEl.addEventListener('click', (e) => {
+                        if (e.ctrlKey || e.metaKey) window.open(part, '_blank', 'noopener,noreferrer');
+                        else { e.preventDefault(); printLocalMessage("[NOTICE] HOLD CTRL KEY + CLICK TO EXECUTE LINK PATHWAY.", true); }
+                    });
+                    linkEl.addEventListener('mouseenter', () => cursorTooltip.style.opacity = '1');
+                    linkEl.addEventListener('mousemove', (e) => { cursorTooltip.style.left = (e.clientX + 12) + 'px'; cursorTooltip.style.top = (e.clientY + 12) + 'px'; });
+                    linkEl.addEventListener('mouseleave', () => cursorTooltip.style.opacity = '0');
+                    parentElement.appendChild(linkEl);
+                } else {
+                    parentElement.appendChild(document.createTextNode(part));
+                }
+            });
+        }
+
+        function insertMessageChronologically(newLine, timestamp) {
+            newLine.setAttribute('data-timestamp', timestamp);
+            const existingLines = Array.from(chatHistory.children);
+            let inserted = false;
+            
+            for (let i = existingLines.length - 1; i >= 0; i--) {
+                const lineTime = parseInt(existingLines[i].getAttribute('data-timestamp') || 0);
+                if (timestamp >= lineTime) {
+                    existingLines[i].after(newLine);
+                    inserted = true;
+                    break;
+                }
+            }
+            if (!inserted) chatHistory.prepend(newLine);
+        }
+
+        // Added transient flag to auto-remove clutter
+        function printLocalMessage(msg, transient = false) {
+            const newLine = document.createElement('div');
+            newLine.className = 'line';
+
+            const prompt = document.createElement('span');
+            prompt.className = 'sys-prompt';
+            prompt.textContent = '>> ';
+
+            const text = document.createElement('span');
+            text.className = 'text system-msg';
+            parseAndAppendTextWithLinks(text, msg);
+
+            newLine.appendChild(prompt);
+            newLine.appendChild(text);
+
+            insertMessageChronologically(newLine, Date.now());
+            window.scrollTo(0, document.body.scrollHeight);
+
+            if (transient) {
+                setTimeout(() => {
+                    newLine.style.transition = "opacity 1s ease";
+                    newLine.style.opacity = "0";
+                    setTimeout(() => newLine.remove(), 1000);
+                }, CONFIG.TRANSIENT_MSG_MS);
+            }
+
+            return newLine;
+        }
+
+        function wakeTerminal() {
+            if (terminalState === "START") {
+                terminalState = "LOGIN";
+                promptSpan.textContent = '> ENTER ACCESS PHRASE: ';
+                mainCursor.classList.remove('cursor-start');
+                mobileInput.focus();
+            }
+        }
+
+        // =====================================================================
+        // 7. COMMAND PARSER
+        // =====================================================================
+        async function handleCommand(cmd) {
+            const command = cmd.toUpperCase();
+            
+            if (command === '/HELP' || command === '/H') {
+                printLocalMessage("SYSTEM COMMANDS:", false);
+                printLocalMessage("/STATUS  : Display live room diagnostics", false);
+                printLocalMessage("/PURGE   : Execute permanent message wipe", false);
+                printLocalMessage("/CLEAR   : Clear local terminal display", false);
+                printLocalMessage("/ADMIN   : Authenticate creator payload", false);
+                printLocalMessage("/EXIT    : Terminate secure session", false);
+                return true;
+            }
+            if (command === '/CLEAR' || command === '/CLS') {
+                chatHistory.innerHTML = '';
+                return true;
+            }
+            if (command === '/ADMIN') {
+                printLocalMessage("[SYSTEM] FETCHING SECURE PAYLOAD...", true);
+                try {
+                    const targetUrl = atob("aHR0cHM6Ly9yYXcuZ2l0aHVidXNlcmNvbnRlbnQuY29tL2hldGh3aVEvc2l0ZWFzc2V0cy9yZWZzL2hlYWRzL21haW4vRmlsZXMvYWRtaW4udHh0");
+                    const response = await fetch(targetUrl);
+                    if (!response.ok) throw new Error("PAYLOAD MISSING");
+                    const data = await response.text();
+                    printLocalMessage(`${data}`, false);
+                } catch (error) {
+                    printLocalMessage("[ERROR] ADMIN PAYLOAD OFFLINE.", false);
+                }
+                return true;
+            }
+            if (command === '/PURGE') {
+                confirmPrompt = printLocalMessage("[SYSTEM] CONFIRM PURGE? [Y/N]", false);
+                terminalState = "CONFIRM_PURGE";
+                return true;
+            }
+            if (command === '/STATUS') {
+                const metaSnap = await get(ref(db, `rooms/${activeRoomHash}/metadata`));
+                if (metaSnap.exists()) {
+                    const meta = metaSnap.val();
+                    const now = Date.now();
+                    const ageMs = now - meta.createdAt;
+                    const ageH = Math.floor(ageMs / 3600000).toString().padStart(2, '0');
+                    const ageM = Math.floor((ageMs % 3600000) / 60000).toString().padStart(2, '0');
+                    const remMs = Math.max(0, meta.expiresAt - now);
+                    const remH = Math.floor(remMs / 3600000).toString().padStart(2, '0');
+                    const remM = Math.floor((remMs % 3600000) / 60000).toString().padStart(2, '0');
+
+                    printLocalMessage(`ROOM           ${activeRoomID}`, false);
+                    printLocalMessage(`OPERATORS      ${currentOperatorCount}/${CONFIG.MAX_OPERATORS}`, false);
+                    printLocalMessage(`ROOM AGE       ${ageH}h ${ageM}m`, false);
+                    printLocalMessage(`TIME REMAINING ${remH}h ${remM}m`, false);
+                }
+                return true;
+            }
+            if (command === '/EXIT' || command === '/BYE') {
+                printLocalMessage("[SYSTEM] CONFIRM EXIT? [Y/N]", false);
+                terminalState = "CONFIRM_EXIT";
+                return true;
+            }
+            return false;
+        }
+
+        async function executeExit() {
+            clearInterval(heartbeatTimer);
+            clearTimeout(warningTimer);
+            if (unsubChildAdded) unsubChildAdded();
+            if (unsubValue) unsubValue();
+            if (unsubPresence) unsubPresence();
+            
+            await remove(mySessionRef);
+            
+            const sessSnap = await get(ref(db, `rooms/${activeRoomHash}/sessions`));
+            const msgSnap = await get(messagesRef);
+            
+            let activeCount = 0;
+            if (sessSnap.exists()) {
+                const now = Date.now();
+                for (const sData of Object.values(sessSnap.val())) {
+                    if (now - sData.lastSeen <= CONFIG.SESSION_TIMEOUT_MS) activeCount++;
+                }
+            }
+            
+            if (activeCount === 0 && !msgSnap.exists()) {
+                await remove(ref(db, `rooms/${activeRoomHash}`));
+            }
+            
+            sessionStorage.removeItem('tt_access_phrase');
+            sessionStorage.removeItem('tt_session_id');
+
+            terminalState = "START";
+            activeAccessPhrase = "";
+            activeRoomHash = "";
+            activeRoomID = "";
+            mySessionId = null;
+            floatingCounter.style.display = 'none';
+            chatHistory.innerHTML = '';
+            printLocalMessage("[SYSTEM] OPERATOR DISCONNECTED.", true);
+            promptSpan.textContent = '';
+            mainCursor.classList.add('cursor-start');
+        }
+
+        // =====================================================================
+        // 8. CHAT ENGINE & NOTIFICATIONS
+        // =====================================================================
         document.addEventListener('visibilitychange', () => {
             if (!document.hidden) {
                 clearInterval(alertInterval);
@@ -265,180 +502,31 @@
             }
         });
 
-        function handleInactivityDeath() {
-            if (terminalState !== "CHAT") return;
-            
-            if (unsubValue) unsubValue();
-            if (unsubChildAdded) unsubChildAdded();
-            userPassphrase = ""; 
-            sessionStorage.removeItem('truth_key');
-
-            chatHistory.innerHTML = '';
-            lastRenderedDate = null;
-            terminalState = "START";
-            promptSpan.textContent = '';
-            mobileInput.value = '';
-            textSpan.textContent = '';
-            mainCursor.classList.add('cursor-start');
-            
-            clearInterval(alertInterval);
-            document.title = originalTitle;
-            isBlinking = false;
-
-            const deathMsg = document.createElement('div');
-            deathMsg.className = 'line term-green';
-            deathMsg.style.fontStyle = 'italic';
-            deathMsg.style.opacity = '0.7';
-            deathMsg.textContent = ">> SYSTEM HALTED: 15 MINUTE INACTIVITY TIMEOUT. CONNECTION SEVERED.";
-            chatHistory.appendChild(deathMsg);
-        }
-
-        function resetInactivityTimer() {
-            if (terminalState !== "CHAT") return;
-            clearTimeout(inactivityTimeout);
-            inactivityTimeout = setTimeout(handleInactivityDeath, INACTIVITY_LIMIT_MS);
-        }
-
-        window.addEventListener('DOMContentLoaded', () => {
-            if(terminalState !== "OVERFLOW") mobileInput.focus();
-
-            if (terminalState === "CHAT") {
-                userPassphrase = sessionStorage.getItem('truth_key');
-                mainCursor.classList.remove('cursor-start');
-                promptSpan.textContent = '> ';
-                printLocalMessage("SESSION RESTORED. MEMORY PARSING INITIALIZED...");
-                setTimeout(() => { bootFirebaseChat(); }, 400);
-            }
-        });
-
-        document.addEventListener('click', () => {
-            if(terminalState !== "OVERFLOW") mobileInput.focus();
-        });
-
-        function wakeTerminal() {
-            if (terminalState === "START" && terminalState !== "OVERFLOW") {
-                terminalState = "LOGIN";
-                promptSpan.textContent = '> ENTER SYSTEM KEY: ';
-                mainCursor.classList.remove('cursor-start');
-                mobileInput.focus();
-            }
-        }
-
-        mainCursor.addEventListener('click', wakeTerminal);
-
-        function updateTypingState(isTyping) { /* Disabled */ }
-
-        mobileInput.addEventListener('input', () => {
-            if (terminalState === "START" || terminalState === "OVERFLOW") {
-                mobileInput.value = '';
-                textSpan.textContent = '';
-                return;
-            }
-            textSpan.textContent = mobileInput.value;
-        });
-
-        async function runEphemeralCleanup() {
-            printLocalMessage("RUNNING EPHEMERAL PURGE ENGINE...");
-            const snapshot = await get(messagesRef);
-            if (snapshot.exists()) {
-                const nowMs = Date.now();
-                const oneDayMs = 24 * 60 * 60 * 1000; 
-                let purgeCount = 0;
-
-                snapshot.forEach((childSnapshot) => {
-                    const data = childSnapshot.val();
-                    if (data.timestamp && (nowMs - data.timestamp > oneDayMs)) {
-                        remove(ref(db, `messages/${childSnapshot.key}`));
-                        purgeCount++;
-                    }
-                });
-                if (purgeCount > 0) {
-                    printLocalMessage(`SUCCESS: PURGED ${purgeCount} EXPIRED DATABASE LOGS.`);
-                } else {
-                    printLocalMessage(`SYSTEM CHECK: ALL RECENT RECORDS VALID.`);
-                }
-            }
-        }
-
-        function parseAndAppendTextWithLinks(parentElement, rawString) {
-            const urlRegex = /(https?:\/\/[^\s]+)/g;
-            const parts = rawString.split(urlRegex);
-
-            parts.forEach(part => {
-                if (part.match(urlRegex)) {
-                    const linkEl = document.createElement('a');
-                    linkEl.className = 'term-link';
-                    linkEl.textContent = part;
-                    
-                    linkEl.addEventListener('click', (e) => {
-                        if (e.ctrlKey || e.metaKey) {
-                            window.open(part, '_blank', 'noopener,noreferrer');
-                        } else {
-                            e.preventDefault();
-                            printLocalMessage("NOTICE: HOLD CTRL KEY + CLICK TO EXECUTE LINK PATHWAY.");
-                        }
-                    });
-
-                    linkEl.addEventListener('mouseenter', () => {
-                        cursorTooltip.style.opacity = '1';
-                    });
-                    
-                    linkEl.addEventListener('mousemove', (e) => {
-                        cursorTooltip.style.left = (e.clientX + 12) + 'px';
-                        cursorTooltip.style.top = (e.clientY + 12) + 'px';
-                    });
-
-                    linkEl.addEventListener('mouseleave', () => {
-                        cursorTooltip.style.opacity = '0';
-                    });
-
-                    parentElement.appendChild(linkEl);
-                } else {
-                    const textNode = document.createTextNode(part);
-                    parentElement.appendChild(textNode);
-                }
-            });
-        }
-
         function bootFirebaseChat() {
-            chatHistory.innerHTML = '';
-            lastRenderedDate = null;
-            sessionStartTime = Date.now(); 
-            resetInactivityTimer(); 
-
-            if (unsubValue) unsubValue();
+            sessionStartTime = Date.now();
+            
             if (unsubChildAdded) unsubChildAdded();
+            if (unsubValue) unsubValue();
 
             unsubValue = onValue(messagesRef, (snapshot) => {
                 if (!snapshot.exists()) {
-                    chatHistory.innerHTML = '';
-                    lastRenderedDate = null;
+                    const msgLines = chatHistory.querySelectorAll('.remote-msg');
+                    msgLines.forEach(line => line.remove());
                 }
             });
 
-            unsubChildAdded = async (snapshot) => {
+            // FIXED: Properly attach the callback so we capture the true unsubscribe function
+            const childAddedCallback = async (snapshot) => {
                 const data = snapshot.val();
-
-                // --- ADDED: Check if user is scrolled near the bottom before adding the new message ---
                 const isNearBottom = (document.body.scrollHeight - window.scrollY - window.innerHeight) < 150;
-
-                if (data.date && data.date !== lastRenderedDate) {
-                    const dateLine = document.createElement('div');
-                    dateLine.className = 'line date-header';
-                    dateLine.textContent = `[ LOG DATE: ${data.date} ]`;
-                    chatHistory.appendChild(dateLine);
-                    lastRenderedDate = data.date;
-                }
 
                 let displayedText = "[CORRUPT ENCRYPTED PAYLOAD]";
                 if (data.encryptedPayload) {
                     displayedText = await decryptMessage(data.encryptedPayload.cipher, data.encryptedPayload.iv, data.encryptedPayload.salt);
-                } else if (data.text) {
-                    displayedText = data.text; 
                 }
 
                 const newLine = document.createElement('div');
-                newLine.className = 'line';
+                newLine.className = 'line remote-msg'; 
                 
                 const promptEl = document.createElement('span');
                 promptEl.className = 'prompt';
@@ -454,16 +542,11 @@
 
                 const textEl = document.createElement('span');
                 textEl.className = 'text';
-                
                 parseAndAppendTextWithLinks(textEl, displayedText);
                 newLine.appendChild(textEl);
                 
-                chatHistory.appendChild(newLine);
-
-                // --- ADDED: Smart Scroll Logic. Only scrolls down if you were already at the bottom ---
-                if (isNearBottom) {
-                    window.scrollTo(0, document.body.scrollHeight);
-                }
+                insertMessageChronologically(newLine, data.timestamp || Date.now());
+                if (isNearBottom) window.scrollTo(0, document.body.scrollHeight);
 
                 if (data.timestamp && data.timestamp > sessionStartTime && document.hidden && !isBlinking) {
                     isBlinking = true;
@@ -474,50 +557,28 @@
                     }, 1000);
                 }
             };
-            
-            onChildAdded(messagesRef, unsubChildAdded);
+            unsubChildAdded = onChildAdded(messagesRef, childAddedCallback);
         }
 
-        function printLocalMessage(msg) {
-            const newLine = document.createElement('div');
-            newLine.className = 'line';
-            
-            const prompt = document.createElement('span');
-            prompt.className = 'sys-prompt';
-            prompt.textContent = '>> ';
-            
-            const text = document.createElement('span');
-            text.className = 'text system-msg';
-            
-            parseAndAppendTextWithLinks(text, msg);
-            
-            newLine.appendChild(prompt);
-            newLine.appendChild(text);
+        // =====================================================================
+        // 9. INPUT HANDLING
+        // =====================================================================
+        mainCursor.addEventListener('click', wakeTerminal);
+        document.addEventListener('click', () => { if(terminalState !== "START" && terminalState !== "OVERFLOW") mobileInput.focus(); });
 
-            chatHistory.appendChild(newLine);
-            // System commands and local logs should always snap the user to the bottom to see the result
-            window.scrollTo(0, document.body.scrollHeight);
-        }
+        mobileInput.addEventListener('input', () => {
+            if (terminalState === "START") { mobileInput.value = ''; textSpan.textContent = ''; return; }
+            textSpan.textContent = mobileInput.value;
+        });
 
         document.addEventListener('keydown', async function (e) {
-            if (terminalState === "OVERFLOW") return;
-            mobileInput.focus();
-            
-            if (terminalState === "CHAT") {
-                resetInactivityTimer();
-            }
-
+            if(terminalState !== "START") mobileInput.focus();
             if (e.ctrlKey || e.metaKey || e.altKey) return;
 
             if (terminalState === "START") {
-                if (e.key === 'Enter') {
-                    e.preventDefault();
-                    wakeTerminal();
-                } else {
-                    e.preventDefault();
-                }
-                mobileInput.value = '';
-                textSpan.textContent = '';
+                if (e.key === 'Enter') e.preventDefault(), wakeTerminal();
+                else e.preventDefault();
+                mobileInput.value = ''; textSpan.textContent = '';
                 return;
             }
 
@@ -525,48 +586,20 @@
                 e.preventDefault();
                 const currentText = mobileInput.value.trim();
 
-                if (currentText.startsWith('/hash ')) {
-                    const wordToHash = currentText.replace('/hash ', '').toUpperCase();
-                    const generatedHash = await hashText(wordToHash);
-                    printLocalMessage(`GENERATED HASH FOR [${wordToHash}]:`);
-                    printLocalMessage(`${generatedHash}`);
-                    mobileInput.value = '';
-                    textSpan.textContent = '';
-                    return;
-                }
-
-                if (terminalState === "LOGIN") {
-                    const inputHash = await hashText(currentText.toUpperCase());
-
-                    if (inputHash === SYSTEM_HASH) {
-                        userPassphrase = currentText.toUpperCase(); 
-                        
-                        sessionStorage.setItem('truth_key', userPassphrase);
-                        
-                        printLocalMessage("ACCESS GRANTED. MEMORY PARSING INITIALIZED...");
-                        
-                        await runEphemeralCleanup();
-                        
-                        mobileInput.value = '';
-                        textSpan.textContent = '';
-                        promptSpan.textContent = '> ';
-                        terminalState = "CHAT";
-                        setTimeout(() => { bootFirebaseChat(); }, 800);
-                    } else {
-                        printLocalMessage("ACCESS DENIED.");
-                        mobileInput.value = '';
-                        textSpan.textContent = '';
-                    }
-                    return;
-                }
-
                 if (terminalState === "CONFIRM_PURGE") {
-                    if (currentText.toUpperCase() === 'Y') {
-                        remove(messagesRef);
-                        lastRenderedDate = null;
-                    } else {
-                        printLocalMessage("PURGE CANCELLED.");
+
+                    if (confirmPrompt) {
+                        confirmPrompt.remove();
+                        confirmPrompt = null;
                     }
+
+                    if (currentText.toUpperCase() === 'Y') {
+                        await remove(messagesRef);
+                        printLocalMessage("[SYSTEM] ROOM HISTORY PURGED", true);
+                    } else {
+                        printLocalMessage("[SYSTEM] PURGE CANCELLED", true);
+                    }
+
                     terminalState = "CHAT";
                     mobileInput.value = '';
                     textSpan.textContent = '';
@@ -575,142 +608,105 @@
 
                 if (terminalState === "CONFIRM_EXIT") {
                     if (currentText.toUpperCase() === 'Y') {
-                        if (unsubValue) unsubValue();
-                        userPassphrase = ""; 
-
-                        sessionStorage.removeItem('truth_key');
-                        clearTimeout(inactivityTimeout);
-
-                        chatHistory.innerHTML = '';
-                        lastRenderedDate = null;
-                        terminalState = "START";
-                        promptSpan.textContent = '';
-                        mobileInput.value = '';
-                        textSpan.textContent = '';
-
-                        mainCursor.classList.add('cursor-start');
+                        executeExit();
                     } else {
-                        printLocalMessage("EXIT CANCELLED.");
+                        printLocalMessage("[SYSTEM] EXIT CANCELLED", true);
                         terminalState = "CHAT";
-                        mobileInput.value = '';
-                        textSpan.textContent = '';
+                    }
+                    mobileInput.value = ''; textSpan.textContent = '';
+                    return;
+                }
+
+                if (terminalState === "LOGIN") {
+                    if (!isValidAccessPhrase(currentText)) {
+                        printLocalMessage("[ERROR] INVALID FORMAT. USE ALPHANUMERIC CHARACTERS ONLY.", true);
+                        mobileInput.value = ''; textSpan.textContent = '';
+                        return;
+                    }
+
+                    activeAccessPhrase = currentText;
+                    sessionStorage.setItem('tt_access_phrase', activeAccessPhrase);
+                    
+                    activeRoomHash = await hashText(activeAccessPhrase);
+                    activeRoomID = generateDisplayRoomID(activeRoomHash);
+
+                    printLocalMessage(`[SYSTEM] ACCESS PHRASE ACCEPTED.`, true);
+                    printLocalMessage(`[SYSTEM] TARGETING ROOM [${activeRoomID}]...`, true);
+                    
+                    const joined = await joinOrCreateRoom();
+                    
+                    if (joined) {
+                        printLocalMessage(`[SYSTEM] OPERATOR CONNECTED.`, true);
+                        floatingCounter.style.display = 'block';
+                        mobileInput.value = ''; textSpan.textContent = '';
+                        promptSpan.textContent = '> ';
+                        terminalState = "CHAT";
+                        bootFirebaseChat();
+                    } else {
+                        sessionStorage.removeItem('tt_access_phrase');
+                        mobileInput.value = ''; textSpan.textContent = '';
+                        promptSpan.textContent = '> ENTER ACCESS PHRASE: ';
+                        terminalState = "LOGIN";
                     }
                     return;
                 }
 
-                if (terminalState === "CHAT") {
-                    if (currentText === '/help' || currentText === '/h') {
-                        printLocalMessage("SYSTEM COMMANDS:");
-                        printLocalMessage("/help, /h    : Show this system manual");
-                        printLocalMessage("/motd        : Print system message of the day");
-                        printLocalMessage("/sysinfo     : Display terminal diagnostics");
-                        printLocalMessage("/uptime      : Display active session duration");
-                        printLocalMessage("/purge, /cls : Execute global database wipe");
-                        printLocalMessage("/admin       : Retrieve secure remote payload");
-                        printLocalMessage("/hash [text] : Generate SHA-256 string");
-                        printLocalMessage("/bye, /exit  : Terminate secure session");
-                        
-                        mobileInput.value = '';
-                        textSpan.textContent = '';
-                        return;
-                    }
-                    else if (currentText === '/motd') {
-                        printLocalMessage("TRUTH_TERMINAL v2.4.1 SECURE ENCLAVE ACTIVE.");
-                        printLocalMessage("E2E ENCRYPTION VERIFIED. ALL COMMS SECURED.");
-                        printLocalMessage("UNAUTHORIZED ACCESS WILL BE AUTOMATICALLY LOGGED.");
-                        mobileInput.value = '';
-                        textSpan.textContent = '';
-                        return;
-                    }
-                    else if (currentText === '/sysinfo') {
-                        const upMs = Date.now() - sessionStartTime;
-                        const minutes = Math.floor(upMs / 60000);
-                        const seconds = Math.floor((upMs % 60000) / 1000);
-                        printLocalMessage("SYSTEM DIAGNOSTICS:");
-                        printLocalMessage(`CONNECTION   : SECURE (wss://firebase)`);
-                        printLocalMessage(`LOCAL CACHE  : ACTIVE`);
-                        printLocalMessage(`SESSION TIME : ${minutes}m ${seconds}s`);
-                        mobileInput.value = '';
-                        textSpan.textContent = '';
-                        return;
-                    }
-                    else if (currentText === '/uptime') {
-                        const upMs = Date.now() - sessionStartTime;
-                        const minutes = Math.floor(upMs / 60000);
-                        const seconds = Math.floor((upMs % 60000) / 1000);
-                        printLocalMessage(`CURRENT SESSION UPTIME: ${minutes} MIN, ${seconds} SEC`);
-                        mobileInput.value = '';
-                        textSpan.textContent = '';
-                        return;
-                    }
-                    else if (currentText === '/purge' || currentText === '/cls') {
-                        terminalState = "CONFIRM_PURGE";
-                        printLocalMessage("CONFIRM PURGE? [Y/N]");
-                        mobileInput.value = '';
-                        textSpan.textContent = '';
-                        return;
-                    }
-                    else if (currentText === '/exit' || currentText === '/bye') {
-                        terminalState = "CONFIRM_EXIT";
-                        printLocalMessage("CONFIRM EXIT? [Y/N]");
-                        mobileInput.value = '';
-                        textSpan.textContent = '';
-                        return;
-                    }
-                    else if (currentText === '/admin') {
-                        printLocalMessage("FETCHING SECURE PAYLOAD...");
-                        mobileInput.value = '';
-                        textSpan.textContent = '';
-                        
-                        try {
-                            const targetUrl = atob("aHR0cHM6Ly9yYXcuZ2l0aHVidXNlcmNvbnRlbnQuY29tL2hldGh3aVEvc2l0ZWFzc2V0cy9yZWZzL2hlYWRzL21haW4vRmlsZXMvYWRtaW4udHh0");
-                            const response = await fetch(targetUrl);
-                            if (!response.ok) throw new Error("PAYLOAD MISSING");
-                            const data = await response.text();
-                            printLocalMessage(`${data}`);
-                        } catch (error) {
-                            printLocalMessage("ERROR: ADMIN PAYLOAD OFFLINE.");
+                if (terminalState === "CHAT" && currentText.length > 0) {
+                    if (currentText.startsWith('/')) {
+                        const isCommand = await handleCommand(currentText);
+                        if (isCommand) {
+                            mobileInput.value = ''; textSpan.textContent = '';
+                            return;
                         }
-                        return;
-                    }
-                    
-                    const currentTime = Date.now();
-                    if (currentTime - lastMessageTime < RATE_LIMIT_MS) {
-                        printLocalMessage("SYSTEM WARNING: FLOOD OVERLOAD PROTECTION ACTIVE. SLOW DOWN.");
-                        mobileInput.value = '';
-                        textSpan.textContent = '';
-                        return;
                     }
 
-                    if (currentText.length > 0) {
-                        lastMessageTime = currentTime; 
-                        const now = new Date();
+                    const now = new Date();
+                    const hours = String(now.getHours()).padStart(2, '0');
+                    const minutes = String(now.getMinutes()).padStart(2, '0');
+                    const seconds = String(now.getSeconds()).padStart(2, '0');
 
-                        const year = now.getFullYear();
-                        const month = String(now.getMonth() + 1).padStart(2, '0');
-                        const day = String(now.getDate()).padStart(2, '0');
-                        const dateString = `${day}-${month}-${year}`;
+                    const encryptedPayload = await encryptMessage(currentText);
 
-                        const hours = String(now.getHours()).padStart(2, '0');
-                        const minutes = String(now.getMinutes()).padStart(2, '0');
-                        const seconds = String(now.getSeconds()).padStart(2, '0');
+                    push(messagesRef, {
+                        encryptedPayload: encryptedPayload,
+                        time: `${hours}:${minutes}:${seconds}`,
+                        timestamp: Date.now()
+                    });
 
-                        const encryptedPayload = await encryptMessage(currentText);
+                    mobileInput.value = ''; textSpan.textContent = '';
+                }
+            }
+        });
 
-                        push(messagesRef, {
-                            encryptedPayload: encryptedPayload,
-                            time: `${hours}:${minutes}:${seconds}`,
-                            date: dateString,
-                            timestamp: currentTime 
-                        });
-
-                        mobileInput.value = '';
-                        textSpan.textContent = '';
-                    }
+        // =====================================================================
+        // 10. INITIALIZATION & SESSION RESTORE
+        // =====================================================================
+        window.addEventListener('DOMContentLoaded', async () => { 
+            mobileInput.focus(); 
+            
+            const savedPhrase = sessionStorage.getItem('tt_access_phrase');
+            if (savedPhrase) {
+                mainCursor.classList.remove('cursor-start');
+                activeAccessPhrase = savedPhrase;
+                activeRoomHash = await hashText(activeAccessPhrase);
+                activeRoomID = generateDisplayRoomID(activeRoomHash);
+                
+                printLocalMessage(`[SYSTEM] RESTORING SESSION FOR ROOM [${activeRoomID}]...`, true);
+                
+                const joined = await joinOrCreateRoom();
+                if (joined) {
+                    printLocalMessage(`[SYSTEM] OPERATOR RECONNECTED.`, true);
+                    floatingCounter.style.display = 'block';
+                    promptSpan.textContent = '> ';
+                    terminalState = "CHAT";
+                    bootFirebaseChat();
+                } else {
+                    sessionStorage.removeItem('tt_access_phrase');
+                    sessionStorage.removeItem('tt_session_id');
+                    terminalState = "START";
                 }
             }
         });
     </script>
 </body>
-
 </html>
