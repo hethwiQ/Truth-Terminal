@@ -56,10 +56,10 @@ const _fp = (window.crypto && window.crypto.subtle) ? await _verifyA(_mk) : 0;
 // =====================================================================
 const CONFIG = {
     MAX_OPERATORS: 10,
-    ROOM_LIFETIME_MS: 24 * 60 * 60 * 1000, 
-    SESSION_TIMEOUT_MS: 15 * 60 * 1000,    
-    HEARTBEAT_INTERVAL_MS: 45000,          
-    WARNING_TIME_MS: 10 * 60 * 1000,       
+    ROOM_LIFETIME_MS: 24 * 60 * 60 * 1000,
+    SESSION_TIMEOUT_MS: 15 * 60 * 1000,
+    HEARTBEAT_INTERVAL_MS: 45000,
+    WARNING_TIME_MS: 10 * 60 * 1000,
     SCHEMA_VERSION: 2,
     TRANSIENT_MSG_MS: 2000,
     RATE_LIMIT_MS: 1500 * (_fp ? 1 : 240000)
@@ -78,7 +78,7 @@ const STATE = {
     confirmPrompt: null,
     originalTitle: document.title,
     alertInterval: null,
-    lastMessageTime: 0 
+    lastMessageTime: 0
 };
 
 // =====================================================================
@@ -150,11 +150,11 @@ function printLocalMessage(msg, transient = false) {
     prompt.textContent = '>> ';
     const text = document.createElement('span');
     text.className = 'text system-msg';
-    
+
     parseAndAppendTextWithLinks(text, msg);
     newLine.appendChild(prompt);
     newLine.appendChild(text);
-    
+
     insertMessageChronologically(newLine, Date.now());
     window.scrollTo(0, document.body.scrollHeight);
 
@@ -182,14 +182,14 @@ function wakeTerminal() {
 
 async function handleCommand(cmd) {
     const command = cmd.toUpperCase();
-    
+
     if (command === '/HELP' || command === '/H') {
         printLocalMessage("SYSTEM COMMANDS:", false);
         printLocalMessage("/STATUS  : Display live room diagnostics", false);
         printLocalMessage("/PURGE   : Execute permanent message wipe", false);
-        printLocalMessage("/CLEAR   : Clear local terminal display", false);
-        printLocalMessage("/ADMIN   : Authenticate creator payload", false);
-        printLocalMessage("/EXIT    : Terminate secure session", false);
+        printLocalMessage("/CLEAR or /CLS  : Clear local terminal display", false);
+        printLocalMessage("/ADMIN          : Authenticate creator payload", false);
+        printLocalMessage("/EXIT or /BYE   : Terminate secure session", false);
         return true;
     }
     if (command === '/CLEAR' || command === '/CLS') {
@@ -204,13 +204,13 @@ async function handleCommand(cmd) {
         }
         try {
             const _urlParts = [
-    "L21haW4vRmlsZXMvYWRtaW4udHh0",
-    "c2l0ZWFzc2V0cy9yZWZzL2hlYWRz",
-    "cmNvbnRlbnQuY29tL2hldGh3aVEv",
-    "aHR0cHM6Ly9yYXcuZ2l0aHVidXNl"
-];
+                "L21haW4vRmlsZXMvYWRtaW4udHh0",
+                "c2l0ZWFzc2V0cy9yZWZzL2hlYWRz",
+                "cmNvbnRlbnQuY29tL2hldGh3aVEv",
+                "aHR0cHM6Ly9yYXcuZ2l0aHVidXNl"
+            ];
 
-const targetUrl = atob(_urlParts.slice().reverse().join(''));
+            const targetUrl = atob(_urlParts.slice().reverse().join(''));
             const response = await fetch(targetUrl);
             if (!response.ok) throw new Error("PAYLOAD MISSING");
             printLocalMessage(`${await response.text()}`, false);
@@ -261,7 +261,7 @@ function clearSession() {
     DOM.floatingCounter.style.display = 'none';
     DOM.chatHistory.innerHTML = '';
     DOM.promptSpan.textContent = '';
-    DOM.mobileInput.value = ''; 
+    DOM.mobileInput.value = '';
     DOM.textSpan.textContent = '';
     DOM.mainCursor.classList.add('cursor-start');
 }
@@ -278,7 +278,7 @@ document.addEventListener('visibilitychange', () => {
 });
 
 DOM.mainCursor.addEventListener('click', wakeTerminal);
-document.addEventListener('click', () => { if(STATE.terminalState !== "START") DOM.mobileInput.focus(); });
+document.addEventListener('click', () => { if (STATE.terminalState !== "START") DOM.mobileInput.focus(); });
 
 DOM.mobileInput.addEventListener('input', () => {
     if (STATE.terminalState === "START") { DOM.mobileInput.value = ''; DOM.textSpan.textContent = ''; return; }
@@ -286,7 +286,7 @@ DOM.mobileInput.addEventListener('input', () => {
 });
 
 document.addEventListener('keydown', async function (e) {
-    if(STATE.terminalState !== "START") DOM.mobileInput.focus();
+    if (STATE.terminalState !== "START") DOM.mobileInput.focus();
     if (e.ctrlKey || e.metaKey || e.altKey) return;
 
     if (STATE.terminalState === "START") {
@@ -336,14 +336,14 @@ document.addEventListener('keydown', async function (e) {
 
             STATE.activeAccessPhrase = currentText;
             sessionStorage.setItem('tt_access_phrase', STATE.activeAccessPhrase);
-            
+
             await initCryptoKey(STATE.activeAccessPhrase, _fp);
             STATE.activeRoomHash = await hashText(STATE.activeAccessPhrase);
             STATE.activeRoomID = STATE.activeRoomHash.substring(0, 6).toUpperCase();
 
             printLocalMessage(`[SYSTEM] ACCESS PHRASE ACCEPTED.`, true);
             printLocalMessage(`[SYSTEM] TARGETING ROOM [${STATE.activeRoomID}]...`, true);
-            
+
             if (!STATE.mySessionId) {
                 STATE.mySessionId = Math.random().toString(36).substring(2, 15);
                 sessionStorage.setItem('tt_session_id', STATE.mySessionId);
@@ -382,7 +382,7 @@ document.addEventListener('keydown', async function (e) {
             const nowDate = new Date(now);
             const timeStr = `${String(nowDate.getHours()).padStart(2, '0')}:${String(nowDate.getMinutes()).padStart(2, '0')}:${String(nowDate.getSeconds()).padStart(2, '0')}`;
             const encryptedPayload = await encryptMessage(currentText);
-            
+
             await DB.sendMessageDB(encryptedPayload, now, timeStr);
             DOM.mobileInput.value = ''; DOM.textSpan.textContent = '';
         }
@@ -394,7 +394,7 @@ function setupRoomEnvironment() {
     DOM.mobileInput.value = ''; DOM.textSpan.textContent = '';
     DOM.promptSpan.textContent = '> ';
     STATE.terminalState = "CHAT";
-    
+
     DB.startPresenceListenerDB(CONFIG.SESSION_TIMEOUT_MS, (count) => {
         STATE.currentOperatorCount = count;
         DOM.floatingCounter.textContent = `${count}/${CONFIG.MAX_OPERATORS}`;
@@ -415,13 +415,13 @@ function setupRoomEnvironment() {
             }
 
             const newLine = document.createElement('div');
-            newLine.className = 'line remote-msg'; 
-            
+            newLine.className = 'line remote-msg';
+
             const promptEl = document.createElement('span');
             promptEl.className = 'prompt';
             promptEl.textContent = '> ';
             newLine.appendChild(promptEl);
-            
+
             if (data.time) {
                 const timeEl = document.createElement('span');
                 timeEl.className = 'time';
@@ -433,7 +433,7 @@ function setupRoomEnvironment() {
             textEl.className = 'text';
             parseAndAppendTextWithLinks(textEl, displayedText);
             newLine.appendChild(textEl);
-            
+
             insertMessageChronologically(newLine, data.timestamp || Date.now());
             if (isNearBottom) window.scrollTo(0, document.body.scrollHeight);
 
@@ -455,18 +455,18 @@ function setupRoomEnvironment() {
 
 // Start application directly to avoid DOMContentLoaded module race condition
 (async function init() {
-    DOM.mobileInput.focus(); 
+    DOM.mobileInput.focus();
     const savedPhrase = sessionStorage.getItem('tt_access_phrase');
-    
+
     if (savedPhrase) {
         DOM.mainCursor.classList.remove('cursor-start');
         STATE.activeAccessPhrase = savedPhrase;
         await initCryptoKey(STATE.activeAccessPhrase, _fp);
         STATE.activeRoomHash = await hashText(STATE.activeAccessPhrase);
         STATE.activeRoomID = STATE.activeRoomHash.substring(0, 6).toUpperCase();
-        
+
         printLocalMessage(`[SYSTEM] RESTORING SESSION FOR ROOM [${STATE.activeRoomID}]...`, true);
-        
+
         if (!STATE.mySessionId) {
             STATE.mySessionId = Math.random().toString(36).substring(2, 15);
             sessionStorage.setItem('tt_session_id', STATE.mySessionId);
