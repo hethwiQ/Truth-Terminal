@@ -77,7 +77,10 @@ const STATE = {
     confirmPrompt: null,
     originalTitle: document.title,
     alertInterval: null,
-    lastMessageTime: 0
+    lastMessageTime: 0,
+    // UPGRADE: Use localStorage so history survives live-server reloads
+    commandHistory: JSON.parse(localStorage.getItem('tt_command_history') || '[]'),
+    historyIndex: -1
 };
 
 // =====================================================================
@@ -163,7 +166,155 @@ function printLocalMessage(msg, transient = false) {
 }
 
 // =====================================================================
-// 4. CORE WORKFLOWS
+// 4. COMMAND PARSER & APP MODULES (QR)
+// =====================================================================
+class CommandParser {
+    static parse(input) {
+        const regex = /[^\s"']+|"([^"]*)"|'([^']*)'/g;
+        const tokens = [];
+        let match;
+        
+        while ((match = regex.exec(input)) !== null) {
+            tokens.push(match[1] || match[2] || match[0]);
+        }
+
+        if (tokens.length === 0) return null;
+
+        const command = tokens.shift().toUpperCase();
+        const args = [];
+        const flags = {};
+
+        for (let i = 0; i < tokens.length; i++) {
+            const token = tokens[i];
+            if (token.startsWith('-')) {
+                const flagName = token.replace(/^-+/, '').toLowerCase(); 
+                if (i + 1 < tokens.length && !tokens[i + 1].startsWith('-')) {
+                    flags[flagName] = tokens[++i];
+                } else {
+                    flags[flagName] = true; 
+                }
+            } else {
+                args.push(token);
+            }
+        }
+        return { command, args, flags };
+    }
+}
+
+class QRModule {
+    static execute(parsedCmd) {
+        if (typeof QRCode === 'undefined') {
+            printLocalMessage("[ERROR] QR ENGINE NOT INITIALIZED. CHECK SCRIPT TAG IN INDEX.HTML.", false);
+            return;
+        }
+
+        const { args, flags } = parsedCmd;
+        let payload = args.join(' ');
+        
+        if (payload && !payload.startsWith('http') && payload.includes('.com')) {
+            payload = 'https://' + payload;
+        }
+
+        if (!payload) {
+            printLocalMessage("[ERROR] MISSING PAYLOAD. USAGE: /QR [URL/TEXT] [-S SIZE] [-C COLOR] [-D]", false);
+            return;
+        }
+
+        const size = parseInt(flags.s || flags.size) || 256;
+        const colorDark = flags.c || flags.color || "#26ff00"; 
+        const colorLight = flags.b || flags.bg || "#050505";
+        const eccRaw = (flags.e || flags.ecc || "M").toUpperCase();
+        const autoDownload = flags.d || flags.download || false;
+        
+        const eccMap = { 
+            'L': QRCode.CorrectLevel.L, 
+            'M': QRCode.CorrectLevel.M, 
+            'Q': QRCode.CorrectLevel.Q, 
+            'H': QRCode.CorrectLevel.H 
+        };
+        const correctLevel = eccMap[eccRaw] || QRCode.CorrectLevel.M;
+
+        printLocalMessage(`[SYSTEM] GENERATING QR CODE FOR: ${payload}`, false);
+
+        const container = document.createElement('div');
+        container.className = 'line';
+        container.style.display = 'flex';
+        container.style.flexDirection = 'column';
+        container.style.alignItems = 'flex-start';
+        container.style.margin = '15px 0 15px 25px';
+
+        const qrWrapper = document.createElement('div');
+        qrWrapper.style.padding = '15px';
+        qrWrapper.style.backgroundColor = colorLight;
+        qrWrapper.style.border = `1px solid ${colorDark}`;
+        qrWrapper.style.display = 'inline-block';
+
+        try {
+            new QRCode(qrWrapper, {
+                text: payload,
+                width: size,
+                height: size,
+                colorDark: colorDark,
+                colorLight: colorLight,
+                correctLevel: correctLevel
+            });
+
+            container.appendChild(qrWrapper);
+
+            const actionBar = document.createElement('div');
+            actionBar.style.marginTop = '10px';
+            actionBar.style.display = 'flex';
+            actionBar.style.gap = '15px';
+
+            const downloadBtn = document.createElement('button');
+            downloadBtn.textContent = '[ ⬇ DOWNLOAD ]';
+            Object.assign(downloadBtn.style, {
+                background: 'transparent',
+                color: colorDark,
+                border: `1px solid ${colorDark}`,
+                padding: '5px 10px',
+                cursor: 'pointer',
+                fontFamily: '"Source Code Pro", monospace',
+                fontSize: '0.85rem'
+            });
+
+            downloadBtn.onmouseover = () => { downloadBtn.style.background = colorDark; downloadBtn.style.color = colorLight; };
+            downloadBtn.onmouseout = () => { downloadBtn.style.background = 'transparent'; downloadBtn.style.color = colorDark; };
+
+            downloadBtn.onclick = () => {
+                const canvas = qrWrapper.querySelector('canvas');
+                const img = qrWrapper.querySelector('img');
+                const src = canvas ? canvas.toDataURL("image/png") : (img ? img.src : null);
+                if (src) {
+                    QRModule.triggerDownload(src, "terminal-qr.png");
+                }
+            };
+
+            actionBar.appendChild(downloadBtn);
+            container.appendChild(actionBar);
+            
+            insertMessageChronologically(container, Date.now());
+            window.scrollTo(0, document.body.scrollHeight);
+
+            if (autoDownload) setTimeout(() => downloadBtn.click(), 200);
+
+        } catch (err) {
+            printLocalMessage(`[ERROR] QR GENERATION FAILED: ${err.message}`, false);
+        }
+    }
+
+    static triggerDownload(dataUrl, filename) {
+        const link = document.createElement('a');
+        link.href = dataUrl;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    }
+}
+
+// =====================================================================
+// 5. CORE WORKFLOWS
 // =====================================================================
 function wakeTerminal() {
     if (STATE.terminalState === "START") {
@@ -175,7 +326,11 @@ function wakeTerminal() {
 }
 
 async function handleCommand(cmd) {
-    const command = cmd.toUpperCase();
+    const parsed = CommandParser.parse(cmd);
+    if (!parsed) return false;
+    
+    const command = parsed.command;
+
     if (command === '/HELP' || command === '/H') {
         printLocalMessage("SYSTEM COMMANDS:", false);
         printLocalMessage("/STATUS  : Display live room diagnostics", false);
@@ -183,6 +338,12 @@ async function handleCommand(cmd) {
         printLocalMessage("/CLEAR or /CLS  : Clear local terminal display", false);
         printLocalMessage("/ADMIN          : Authenticate creator payload", false);
         printLocalMessage("/EXIT or /BYE   : Terminate secure session", false);
+        printLocalMessage("APPS:", false);
+        printLocalMessage("/QR or /QRGEN   : Generate QR code. Usage: /qr [url/text] [-s size] [-c hex_color] [-d download]", false);
+        return true;
+    }
+    if (command === '/QR' || command === '/QRGEN') {
+        QRModule.execute(parsed);
         return true;
     }
     if (command === '/CLEAR' || command === '/CLS') {
@@ -244,11 +405,14 @@ async function handleCommand(cmd) {
 function clearSession() {
     sessionStorage.removeItem('tt_access_phrase');
     sessionStorage.removeItem('tt_session_id');
+    localStorage.removeItem('tt_command_history'); // UPGRADE: Clear local storage on exit
     STATE.mySessionId = null;
     STATE.terminalState = "START";
     STATE.activeAccessPhrase = "";
     STATE.activeRoomHash = "";
     STATE.activeRoomID = "";
+    STATE.commandHistory = []; 
+    STATE.historyIndex = -1;
     DOM.floatingCounter.style.display = 'none';
     DOM.chatHistory.innerHTML = '';
     DOM.promptSpan.textContent = '';
@@ -258,7 +422,7 @@ function clearSession() {
 }
 
 // =====================================================================
-// 5. EVENT LISTENERS & INIT
+// 6. EVENT LISTENERS & INIT
 // =====================================================================
 document.addEventListener('visibilitychange', () => {
     if (!document.hidden) {
@@ -278,15 +442,47 @@ DOM.mobileInput.addEventListener('input', () => {
 document.addEventListener('keydown', async function (e) {
     if (STATE.terminalState !== "START") DOM.mobileInput.focus();
     if (e.ctrlKey || e.metaKey || e.altKey) return;
+
+    if (STATE.terminalState === "CHAT" && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+        e.preventDefault(); 
+        
+        if (STATE.commandHistory.length === 0) return;
+
+        if (e.key === 'ArrowUp') {
+            if (STATE.historyIndex === -1) {
+                STATE.historyIndex = STATE.commandHistory.length - 1;
+            } else if (STATE.historyIndex > 0) {
+                STATE.historyIndex--;
+            }
+        } else if (e.key === 'ArrowDown') {
+            if (STATE.historyIndex !== -1 && STATE.historyIndex < STATE.commandHistory.length - 1) {
+                STATE.historyIndex++;
+            } else {
+                STATE.historyIndex = -1;
+                DOM.mobileInput.value = '';
+                DOM.textSpan.textContent = '';
+                return;
+            }
+        }
+
+        if (STATE.historyIndex !== -1) {
+            DOM.mobileInput.value = STATE.commandHistory[STATE.historyIndex];
+            DOM.textSpan.textContent = DOM.mobileInput.value;
+        }
+        return;
+    }
+
     if (STATE.terminalState === "START") {
         if (e.key === 'Enter') e.preventDefault(), wakeTerminal();
         else e.preventDefault();
         DOM.mobileInput.value = ''; DOM.textSpan.textContent = '';
         return;
     }
+
     if (e.key === 'Enter') {
         e.preventDefault();
         const currentText = DOM.mobileInput.value.trim();
+        
         if (STATE.terminalState === "CONFIRM_PURGE") {
             if (STATE.confirmPrompt) { STATE.confirmPrompt.remove(); STATE.confirmPrompt = null; }
             if (currentText.toUpperCase() === 'Y') {
@@ -297,6 +493,7 @@ document.addEventListener('keydown', async function (e) {
             DOM.mobileInput.value = ''; DOM.textSpan.textContent = '';
             return;
         }
+        
         if (STATE.terminalState === "CONFIRM_EXIT") {
             if (STATE.confirmPrompt) { STATE.confirmPrompt.remove(); STATE.confirmPrompt = null; }
             if (currentText.toUpperCase() === 'Y') {
@@ -312,6 +509,7 @@ document.addEventListener('keydown', async function (e) {
             DOM.mobileInput.value = ''; DOM.textSpan.textContent = '';
             return;
         }
+        
         if (STATE.terminalState === "LOGIN") {
             if (!/^[a-zA-Z0-9]+$/.test(currentText)) {
                 printLocalMessage("[ERROR] INVALID FORMAT. USE ALPHANUMERIC CHARACTERS ONLY.", true);
@@ -340,14 +538,23 @@ document.addEventListener('keydown', async function (e) {
             }
             return;
         }
+        
         if (STATE.terminalState === "CHAT" && currentText.length > 0) {
             if (currentText.startsWith('/')) {
                 const isCommand = await handleCommand(currentText);
                 if (isCommand) {
+                    if (STATE.commandHistory[STATE.commandHistory.length - 1] !== currentText) {
+                        STATE.commandHistory.push(currentText);
+                        // UPGRADE: Save array to local storage immediately
+                        localStorage.setItem('tt_command_history', JSON.stringify(STATE.commandHistory));
+                    }
+                    STATE.historyIndex = -1; 
+                    
                     DOM.mobileInput.value = ''; DOM.textSpan.textContent = '';
                     return;
                 }
             }
+            
             const now = Date.now();
             if (now - STATE.lastMessageTime < CONFIG.RATE_LIMIT_MS) {
                 printLocalMessage("[SYSTEM] FLOOD OVERLOAD PROTECTION ACTIVE. SLOW DOWN.", true);
@@ -419,7 +626,6 @@ function setupRoomEnvironment() {
     );
 }
 
-// Start application directly to avoid DOMContentLoaded module race condition
 (async function init() {
     DOM.mobileInput.focus();
 
