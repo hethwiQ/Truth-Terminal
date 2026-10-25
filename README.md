@@ -38,7 +38,7 @@ Operators can execute commands directly within the terminal interface by prefixi
 | `/purge` | Permanently wipe all message history from the current room (requires `[Y/N]` confirmation). |
 | `/clear` or `/cls` | Clear the local terminal display. |
 | `/qr` | Generate a downloadable QR code. Usage: `/qr [url/text] [-s size] [-c hex_color] [-d download]` |
-| `/admin` | Authenticate and fetch the verified creator identity payload. |
+| `/admin` | Authenticate and fetch the verified creator identity payload. God Protocol is what verifies the integrity |
 | `/exit` or `/bye` | Terminate your secure session and disconnect (requires `[Y/N]` confirmation). |
 
 ## Security & Privacy Constraints
