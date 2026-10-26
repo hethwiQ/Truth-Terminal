@@ -1,6 +1,105 @@
 import { hashText, initCryptoKey, encryptMessage, decryptMessage, clearCryptoState } from './crypto.js';
 import * as DB from './base.js';
 
+// =====================================================================
+// --- H7 ROUTING SUBSYSTEM ---
+// =====================================================================
+
+const REGISTERED_MODULES = ['#comms']; // ONLY internal tools here.
+
+const QUICK_LINKS = {
+    '#github': 'https://github.com/hethwiQ',
+    '#portfolio': 'https://hethwiq.github.io/Portfolio'
+};
+
+function handleRoute() {
+    const rawHash = window.location.hash.trim();
+    let safeHash = rawHash.toLowerCase().replace(/^#\/*/, '#').replace(/\/+$/, '');
+
+    // 1. Empty route -> redirect to #comms silently
+    if (!safeHash || safeHash === '#') {
+        window.history.replaceState(null, null, '#comms');
+        safeHash = '#comms';
+    }
+
+    // 2. Keyword Redirects (e.g., #github)
+    if (QUICK_LINKS[safeHash]) {
+        window.location.replace(QUICK_LINKS[safeHash]);
+        return;
+    }
+
+    // 3. Direct URL Redirects (e.g., #https://target.com)
+    if (safeHash.startsWith('#http')) {
+        window.location.replace(safeHash.substring(1));
+        return;
+    }
+
+    // 4. Valid internal module -> proceed normally
+    if (REGISTERED_MODULES.includes(safeHash)) {
+        return; 
+    }
+
+    // 5. Unrecognized module -> trigger terminal fault
+    triggerRouteFault(safeHash);
+}
+
+function createDissolvingLine(msg, color) {
+    const newLine = document.createElement('div');
+    newLine.className = 'line';
+    
+    // Explicitly set initial styles so the browser registers the transition
+    newLine.style.opacity = '1';
+    newLine.style.transition = 'opacity 1s ease'; 
+    
+    const text = document.createElement('span');
+    text.className = 'text system-msg';
+    text.style.color = color;
+    text.textContent = msg;
+    newLine.appendChild(text);
+    
+    // Fade out after 2 seconds, remove from DOM after 3 seconds
+    setTimeout(() => {
+        newLine.style.opacity = '0';
+        setTimeout(() => {
+            if (newLine.parentNode) newLine.remove();
+        }, 1000);
+    }, 2000);
+    
+    return newLine;
+}
+
+function triggerRouteFault(faultyHash) {
+    const chatHistory = document.getElementById('chat-history');
+    const rawName = faultyHash.replace(/#|\//g, '').toUpperCase();
+    
+    // Instantly repair the URL so the user isn't stuck on the bad route
+    window.history.replaceState(null, null, '#comms');
+    
+    if (chatHistory) {
+        const fault1 = createDissolvingLine(`[ERR_MODULE_FAULT] SUBSYSTEM '${rawName}' UNRESOLVED.`, '#ff3333');
+        const fault2 = createDissolvingLine(`[SUBSYSTEM] INITIATING FALLBACK SEQUENCE -> #comms...`, '#aaaaaa');
+        
+        chatHistory.appendChild(fault1);
+        chatHistory.appendChild(fault2);
+        window.scrollTo(0, document.body.scrollHeight);
+
+        // Print success message slightly after the errors
+        setTimeout(() => {
+            const success = createDissolvingLine(`[SUBSYSTEM] FALLBACK COMPLETE. RELAY MOUNTED.`, '#25ff00');
+            chatHistory.appendChild(success);
+            window.scrollTo(0, document.body.scrollHeight);
+        }, 800);
+    }
+}
+
+// Attach listeners
+window.addEventListener('DOMContentLoaded', handleRoute);
+window.addEventListener('hashchange', handleRoute);
+
+
+// =====================================================================
+// INTEGRITY & TAMPER CHECKS
+// =====================================================================
 function _decToken1() {
     return [104, 51, 116, 104, 119, 49, 107].map(c => String.fromCharCode(c)).join('');
 }
@@ -78,7 +177,6 @@ const STATE = {
     originalTitle: document.title,
     alertInterval: null,
     lastMessageTime: 0,
-    // UPGRADE: Use localStorage so history survives live-server reloads
     commandHistory: JSON.parse(localStorage.getItem('tt_command_history') || '[]'),
     historyIndex: -1
 };
@@ -405,7 +503,7 @@ async function handleCommand(cmd) {
 function clearSession() {
     sessionStorage.removeItem('tt_access_phrase');
     sessionStorage.removeItem('tt_session_id');
-    localStorage.removeItem('tt_command_history'); // UPGRADE: Clear local storage on exit
+    localStorage.removeItem('tt_command_history'); 
     STATE.mySessionId = null;
     STATE.terminalState = "START";
     STATE.activeAccessPhrase = "";
@@ -545,7 +643,6 @@ document.addEventListener('keydown', async function (e) {
                 if (isCommand) {
                     if (STATE.commandHistory[STATE.commandHistory.length - 1] !== currentText) {
                         STATE.commandHistory.push(currentText);
-                        // UPGRADE: Save array to local storage immediately
                         localStorage.setItem('tt_command_history', JSON.stringify(STATE.commandHistory));
                     }
                     STATE.historyIndex = -1; 
